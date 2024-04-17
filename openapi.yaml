@@ -1,6 +1,6 @@
 openapi: 3.0.0
 info:
-  version: '2.11'
+  version: '2.12'
   title: ADR Marketplace Platform
   description: ADR marketplace management API.
   contact:
@@ -37,6 +37,11 @@ paths:
       operationId: generateToken
       security:
         - BasicAuth: [ ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JwtRequest'
       responses:
         '200':
           description: JWT is returned
@@ -1341,6 +1346,16 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    JwtRequest:
+      type: object
+      properties:
+        hoursUntilExpiry:
+          type: integer
+          minimum: 1
+          maximum: 8760
+        tokenName:
+          type: string
+          maximum: 255
     JwtResponse:
       type: object
       properties:
