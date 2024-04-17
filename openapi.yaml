@@ -1,6 +1,6 @@
 openapi: 3.0.0
 info:
-  version: '2.12'
+  version: '2.13'
   title: ADR Marketplace Platform
   description: ADR marketplace management API.
   contact:
@@ -182,6 +182,30 @@ paths:
                 $ref: '#/components/schemas/OrganizationRead'
         default:
           description: Unknown exception
+  /api/organization/{uniqueId}/balance:
+    get:
+      tags:
+        - organization
+      operationId: getOrganizationFundingBalance
+      security:
+        - Bearer: [ ]
+      summary: Get an Organization funding balance.
+      description: Get the available funds for an organization that can be leveraged to send rewards.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The Organization's Unique ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationBalance'
   /api/organization/{orgId}/webhooks:
     get:
       tags:
@@ -1813,6 +1837,13 @@ components:
           type: integer
         adjustment_total:
           type: integer
+    OrganizationBalance:
+      description: Get the organization available funding balance.
+      type: object
+      properties:
+        balance:
+          type: string
+          description: The available balance for the organization.
     OrganizationList:
       type: object
       properties:
