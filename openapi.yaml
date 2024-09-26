@@ -1276,7 +1276,7 @@ paths:
           schema:
             type: integer
             enum: [ 10, 30, 50, 100 ]
-            default: 100
+            default: 30
         - name: filter[sku]
           in: query
           required: false
