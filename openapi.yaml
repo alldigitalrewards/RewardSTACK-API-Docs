@@ -1248,6 +1248,159 @@ paths:
       responses:
         '200':
           description: success operation
+  /api/program/{programId}/catalog:
+    get:
+      tags:
+        - catalog
+      summary: Catalog Search
+      operationId: CatalogSearch
+      description: Returns a paginated collection of products for the specified program.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: The page number for pagination.
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: The number of products to return per page. Allowed values are 10, 30, 50, 100.
+          schema:
+            type: integer
+            enum: [ 10, 30, 50, 100 ]
+            default: 30
+        - name: filter[sku]
+          in: query
+          required: false
+          description: Filter by product SKU(s). Can be a single SKU or an array of SKUs.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[name]
+          in: query
+          required: false
+          description: Filter by product name.
+          schema:
+            type: string
+        - name: filter[category]
+          in: query
+          required: false
+          description: Filter by product category ID(s). Can be a single category or an array of categories.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[brand]
+          in: query
+          required: false
+          description: Filter by product brand ID(s). Can be a single brand or an array of brands.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[group]
+          in: query
+          required: false
+          description: Filter by product group ID(s). Can be a single group or an array of groups.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[excluded_category]
+          in: query
+          required: false
+          description: Exclude products by category ID(s). Can be a single category or an array of categories.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[excluded_brand]
+          in: query
+          required: false
+          description: Exclude products by brand ID(s). Can be a single brand or an array of brands.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[excluded_group]
+          in: query
+          required: false
+          description: Exclude products by group ID(s). Can be a single group or an array of groups.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: filter[price][min]
+          in: query
+          required: false
+          description: Filter products by minimum price.
+          schema:
+            type: number
+            format: float
+        - name: filter[price][max]
+          in: query
+          required: false
+          description: Filter products by maximum price.
+          schema:
+            type: number
+            format: float
+        - name: filter[ranged]
+          in: query
+          required: false
+          description: Filter products by whether the price is ranged (true) or a fixed value (false).
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  page:
+                    type: integer
+                    description: Current page number.
+                  page_size:
+                    type: integer
+                    description: The number of products per page.
+                  total_count:
+                    type: integer
+                    description: The total number of products matching the query.
+                  total_page_count:
+                    type: integer
+                    description: The total number of pages based on the total count and page size.
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogProduct'
+        default:
+          description: Unknown exception
+  
+  
   /api/batch/participant:
     post:
       tags:
@@ -1368,6 +1521,93 @@ components:
       properties:
         message:
           type: string
+    CatalogProduct:
+      type: object
+      properties:
+        sku:
+          type: string
+        digital:
+          type: boolean
+        price_ranged:
+          type: boolean
+        price:
+          type: number
+          format: float
+          nullable: true
+          description: Present when `price_ranged` is `false`.
+        price_min:
+          type: number
+          format: float
+          nullable: true
+          description: Present when `price_ranged` is `true`.
+        price_max:
+          type: number
+          format: float
+          nullable: true
+          description: Present when `price_ranged` is `true`.
+        category:
+          type: object
+          properties:
+            unique_id:
+              type: string
+            name:
+              type: array
+              items:
+                type: object
+                properties:
+                  locale:
+                    type: string
+        brand:
+          type: object
+          properties:
+            unique_id:
+              type: string
+            name:
+              type: array
+              items:
+                type: object
+                properties:
+                  locale:
+                    type: string
+        images:
+          type: array
+          items:
+            type: object
+            properties:
+              locale:
+                type: string
+        name:
+          type: array
+          items:
+            type: object
+            properties:
+              locale:
+                type: string
+        description:
+          type: array
+          items:
+            type: object
+            properties:
+              locale:
+                type: string
+        terms:
+          type: array
+          items:
+            type: object
+            properties:
+              locale:
+                type: string
+        instructions:
+          type: array
+          items:
+            type: object
+            properties:
+              locale:
+                type: string
+        inventory:
+          type: integer
+        tax_exempt:
+          type: boolean
     UserList:
       type: object
       properties:
