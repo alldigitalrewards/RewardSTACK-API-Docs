@@ -28,6 +28,12 @@ tags:
     description: Operations for transaction management and review.
   - name: webhook
     description: Operations for webhook management and review.
+  - name: milestone
+    description: Operations for milestone management and review.
+  - name: activity
+    description: Operations for milestone activity management.
+  - name: participant progress
+    description: Operations for participant milestone progress tracking.
 paths:
   /token:
     post:
@@ -1400,6 +1406,518 @@ paths:
         default:
           description: Unknown exception
   
+  /api/program/{programId}/milestone:
+    get:
+      tags:
+        - milestone
+      summary: Retrieve milestone collection with optional filters
+      operationId: getMilestoneList
+      security:
+        - Bearer: [ ]
+      description: Returns paginated collection of milestones for the specified program.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MilestoneRead'
+                  current_page:
+                    type: integer
+                    description: Current page number.
+                  total_count:
+                    type: integer
+                    description: The total number of milestones.
+        default:
+          description: Unknown exception
+    post:
+      tags:
+        - milestone
+      summary: Add a new milestone.
+      operationId: addMilestone
+      security:
+        - Bearer: [ ]
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MilestoneCreate'
+        description: Milestone object to add to the program.
+        required: true
+      responses:
+        '201':
+          description: Create a new milestone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneRead'
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}:
+    get:
+      tags:
+        - milestone
+      summary: Find a milestone by ID
+      operationId: getMilestone
+      security:
+        - Bearer: [ ]
+      description: Returns a single milestone with its activities.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneRead'
+        '404':
+          description: Milestone not found.
+        default:
+          description: Unknown exception
+    patch:
+      tags:
+        - milestone
+      summary: Updates a milestone.
+      operationId: updateMilestone
+      security:
+        - Bearer: [ ]
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MilestoneUpdate'
+        description: Milestone object to update.
+        required: true
+      responses:
+        '200':
+          description: Milestone updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneRead'
+        '404':
+          description: Milestone not found.
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}/activity:
+    post:
+      tags:
+        - activity
+      summary: Add a new activity to a milestone.
+      operationId: addActivity
+      security:
+        - Bearer: [ ]
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityCreate'
+        description: Activity object to add to the milestone.
+        required: true
+      responses:
+        '201':
+          description: Create a new activity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityRead'
+        default:
+          description: Unknown exception
+    get:
+      tags:
+        - activity
+      summary: Retrieve all activities for a milestone
+      operationId: getActivityList
+      security:
+        - Bearer: [ ]
+      description: Returns array of activities for the specified milestone.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivityRead'
+        default:
+          description: Unknown exception
+
+  /api/program/{programId}/milestone/{milestoneId}/activity/{activityId}:
+    patch:
+      tags:
+        - activity
+      summary: Updates an activity.
+      operationId: updateActivity
+      security:
+        - Bearer: [ ]
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: activityId
+          in: path
+          required: true
+          description: The Activity Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityUpdate'
+        description: Activity object to update.
+        required: true
+      responses:
+        '200':
+          description: Activity updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityRead'
+        '404':
+          description: Activity not found.
+        default:
+          description: Unknown exception
+    delete:
+      tags:
+        - activity
+      summary: Delete activity by ID
+      operationId: deleteActivity
+      security:
+        - Bearer: [ ]
+      description: Remove an activity from a milestone.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: activityId
+          in: path
+          required: true
+          description: The Activity Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Activity deleted successfully
+        '204':
+          description: Activity deleted successfully
+        '404':
+          description: Activity not found.
+  /api/program/{programId}/milestone/{milestoneId}/participant:
+    get:
+      tags:
+        - participant progress
+      summary: Retrieve list of participant progress for a milestone
+      operationId: getParticipantProgressList
+      security:
+        - Bearer: [ ]
+      description: Returns array of participant progress for the specified milestone.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ParticipantProgress'
+        default:
+          description: Unknown exception
+    post:
+      tags:
+        - participant progress
+      summary: Bulk upsert participant progress
+      operationId: bulkUpsertParticipantProgress
+      security:
+        - Bearer: [ ]
+      description: Create or update progress for multiple participants in bulk.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              example:
+                - participant-unique-id-1
+                - participant-unique-id-2
+                - participant-unique-id-3
+        description: Array of participant unique IDs to create or update progress for.
+        required: true
+      responses:
+        '200':
+          description: Bulk operation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkUpsertResponse'
+        '201':
+          description: Bulk operation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkUpsertResponse'
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}/participant/{participantId}:
+    get:
+      tags:
+        - participant progress
+      summary: Retrieve detailed progress for a specific participant
+      operationId: getParticipantProgress
+      security:
+        - Bearer: [ ]
+      description: Returns detailed progress information for a specific participant in a milestone.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: participantId
+          in: path
+          required: true
+          description: The Participant Unique Identifier.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantProgressDetail'
+        '404':
+          description: Participant progress not found.
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}/participants/{participantId}/activity/{activityId}:
+    patch:
+      tags:
+        - participant progress
+      summary: Mark an activity as complete or incomplete for a participant
+      operationId: updateActivityCompletion
+      security:
+        - Bearer: [ ]
+      description: Update the completion status of a specific activity for a participant.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: participantId
+          in: path
+          required: true
+          description: The Participant Unique Identifier.
+          schema:
+            type: string
+        - name: activityId
+          in: path
+          required: true
+          description: The Activity Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityCompletionUpdate'
+        description: Completion status update.
+        required: true
+      responses:
+        '200':
+          description: Activity completion status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityCompletionResponse'
+        '404':
+          description: Participant progress or activity not found.
+        default:
+          description: Unknown exception
   
   /api/batch/participant:
     post:
@@ -2967,3 +3485,211 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BatchTransactionCollectionItem'
+    MilestoneCreate:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: The name of the milestone
+        completed_email:
+          type: string
+          description: Email message to send when milestone is reached.
+        reward_adjustment:
+          type: number
+          format: float
+          description: Points to award when milestone is completed
+    MilestoneRead:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the milestone
+        name:
+          type: string
+          description: The name of the milestone
+        completed_email:
+          type: string
+          description: Email message to send when milestone is completed
+        reward_adjustment:
+          type: number
+          format: float
+          description: Points to award when milestone is completed
+        active:
+          type: boolean
+          description: Whether the milestone is active
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityRead'
+    MilestoneUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The name of the milestone
+        completed_email:
+          type: string
+          description: Email message to send when milestone is completed
+        reward_adjustment:
+          type: number
+          format: float
+          description: Points to award when milestone is completed
+        active:
+          type: boolean
+          description: Whether the milestone is active
+    ActivityCreate:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: The name of the activity
+    ActivityRead:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the activity
+        name:
+          type: string
+          description: The name of the activity
+        milestone_uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the parent milestone
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ActivityUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The name of the activity
+    ParticipantProgress:
+      type: object
+      properties:
+        participant_unique_id:
+          type: string
+          description: The unique identifier of the participant
+        progress_percentage:
+          type: number
+          format: float
+          description: Completion percentage for the milestone
+        progress_data:
+          type: object
+          description: Detailed progress information
+          properties:
+            activities:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  completed:
+                    type: boolean
+                  completed_at:
+                    type: string
+                    format: date-time
+    ParticipantProgressDetail:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the progress record
+        participant_unique_id:
+          type: string
+          description: The unique identifier of the participant
+        milestone_uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the milestone
+        progress_percentage:
+          type: number
+          format: float
+          description: Completion percentage for the milestone
+        progress_data:
+          type: object
+          description: Detailed progress information
+          properties:
+            activities:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  completed:
+                    type: boolean
+                  completed_at:
+                    type: string
+                    format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BulkUpsertResponse:
+      type: object
+      properties:
+        successes:
+          type: array
+          items:
+            type: string
+          description: Array of participant IDs that were successfully processed
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              participant_id:
+                type: string
+              error:
+                type: string
+          description: Array of participant IDs that failed with error messages
+    ActivityCompletionUpdate:
+      type: object
+      required:
+        - completed
+      properties:
+        completed:
+          type: boolean
+          description: Whether the activity is completed
+    ActivityCompletionResponse:
+      type: object
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the progress record
+        participant_unique_id:
+          type: string
+          description: The unique identifier of the participant
+        activity_uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the activity
+        completed:
+          type: boolean
+          description: Whether the activity is completed
+        completed_at:
+          type: string
+          format: date-time
+          description: When the activity was completed
+        progress_percentage:
+          type: number
+          format: float
+          description: Updated completion percentage for the milestone
