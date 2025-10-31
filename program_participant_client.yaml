@@ -1,0 +1,391 @@
+openapi: 3.0.3
+info:
+  title: Program Participant Client API Specification
+  description: |
+    This specification defines the required endpoints that client systems must implement 
+    to integrate with the Program Participant Service. The service will make requests to 
+    these endpoints to authorize transactions, capture transactions, and fetch participant information.
+    
+    ## Authentication
+    Client endpoints must support one of the following authentication methods:
+    - **API Key**: Include the API key in the `api-key` header
+    - **Bearer Token**: Include the token in the `Authorization` header as `Bearer {token}`
+    
+    ## URL Pattern
+    All endpoints follow the pattern: `https://example.com/some/url/{uuid}`
+    where `{uuid}` is replaced with the participant's unique identifier.
+  version: 1.0.0
+  contact:
+    name: All Digital Rewards
+    email: support@alldigitalrewards.com
+
+servers:
+  - url: https://example.com/api
+    description: Client API Server (replace with actual URL)
+
+paths:
+  /participants/{uuid}/authorize:
+    post:
+      summary: Authorize Transaction
+      description: |
+        Authorizes a transaction for a participant to spend a specified amount of points.
+        Returns an authorization ID that must be used in subsequent capture requests.
+      operationId: authorizeTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          description: Unique identifier of the participant
+          schema:
+            type: string
+            example: "participant_id_12345"
+        - name: lang
+          in: query
+          required: false
+          description: Language/locale preference
+          schema:
+            type: string
+            default: "en_US"
+            example: "en_US"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amount
+                - program
+              properties:
+                amount:
+                  type: string
+                  description: The amount of points to authorize
+                  example: "100.00"
+                program:
+                  type: string
+                  description: The program identifier
+                  example: "program-12345"
+      responses:
+        '200':
+          description: Transaction successfully authorized
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - authorization_id
+                properties:
+                  authorization_id:
+                    type: string
+                    description: Unique identifier for this authorization
+                    example: "auth_123456789"
+        '201':
+          description: Transaction successfully authorized (alternative success code)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - authorization_id
+                properties:
+                  authorization_id:
+                    type: string
+                    description: Unique identifier for this authorization
+                    example: "auth_123456789"
+        '400':
+          description: Bad request - invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - invalid or missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Participant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+
+  /participants/{uuid}/capture:
+    post:
+      summary: Capture Transaction
+      description: |
+        Captures a previously authorized transaction and associates it with a transaction ID.
+        This endpoint is called after points have been spent and a transaction ID is available.
+      operationId: captureTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          description: Unique identifier of the participant
+          schema:
+            type: string
+            example: "jfp1"
+        - name: lang
+          in: query
+          required: false
+          description: Language/locale preference
+          schema:
+            type: string
+            default: "en_US"
+            example: "en_US"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - authorization_id
+                - amount
+                - transaction_id
+              properties:
+                authorization_id:
+                  type: string
+                  description: The authorization ID from the authorize endpoint
+                  example: "auth_123456789"
+                amount:
+                  type: string
+                  description: The amount of points to capture
+                  example: "100.00"
+                transaction_id:
+                  type: string
+                  description: The transaction identifier from the points system
+                  example: "txn_987654321"
+      responses:
+        '200':
+          description: Transaction successfully captured
+        '201':
+          description: Transaction successfully captured (alternative success code)
+        '400':
+          description: Bad request - invalid parameters or authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - invalid or missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Participant or authorization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+
+  /participants/{uuid}/pii:
+    get:
+      summary: Get Participant PII
+      description: |
+        Retrieves personally identifiable information (PII) for a participant including
+        contact information, available credit, and shipping address.
+      operationId: getParticipantPii
+      tags:
+        - Participants
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          description: Unique identifier of the participant
+          schema:
+            type: string
+            example: "jfp1"
+        - name: lang
+          in: query
+          required: false
+          description: Language/locale preference
+          schema:
+            type: string
+            default: "en_US"
+            example: "en_US"
+      responses:
+        '200':
+          description: Participant information successfully retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participant'
+        '400':
+          description: Bad request - invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized - invalid or missing authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Participant not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: api-key
+      description: API key for authentication
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token for authentication
+
+  schemas:
+    Participant:
+      type: object
+      required:
+        - email_address
+        - unique_id
+        - credit
+        - firstname
+        - lastname
+        - phone
+        - language
+        - address
+        - program
+      properties:
+        email_address:
+          type: string
+          format: email
+          description: Participant's email address
+          example: "jhoughtelin@alldigitalrewards.com"
+        unique_id:
+          type: string
+          description: Participant's unique identifier
+          example: "jfp1"
+        credit:
+          type: string
+          description: Available credit/points balance
+          example: "1484999.99"
+        firstname:
+          type: string
+          description: Participant's first name
+          example: "Josh"
+        lastname:
+          type: string
+          description: Participant's last name
+          example: "Houghtelin"
+        phone:
+          type: string
+          description: Participant's phone number
+          example: "1234567890"
+        language:
+          type: string
+          description: Participant's preferred language
+          example: "en_US"
+        address:
+          $ref: '#/components/schemas/Address'
+        program:
+          type: string
+          description: Program identifier the participant belongs to
+          example: "josh-favorite-program"
+
+    Address:
+      type: object
+      required:
+        - firstname
+        - lastname
+        - address1
+        - city
+        - state
+        - zip
+        - country
+        - country_code
+      properties:
+        firstname:
+          type: string
+          description: First name for shipping address
+          example: "Josh"
+        lastname:
+          type: string
+          description: Last name for shipping address
+          example: "Houghtelin"
+        address1:
+          type: string
+          description: Primary address line
+          example: "12345 Chaparral Rd"
+        address2:
+          type: string
+          description: Secondary address line (optional)
+          example: ""
+        city:
+          type: string
+          description: City
+          example: "Scottsdale"
+        state:
+          type: string
+          description: State or province code
+          example: "AZ"
+        zip:
+          type: string
+          description: Postal/ZIP code
+          example: "85250"
+        country:
+          type: string
+          description: Numeric country code
+          example: "840"
+        country_code:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+          example: "US"
+
+    Error:
+      type: object
+      properties:
+        Message:
+          type: string
+          description: Error message describing what went wrong.  This error message is displayed to the participant.
+          example: "Insufficient points balance"
+      description: Error response object
+
+tags:
+  - name: Transactions
+    description: Endpoints for authorizing and capturing point transactions
+  - name: Participants
+    description: Endpoints for retrieving participant information
+
