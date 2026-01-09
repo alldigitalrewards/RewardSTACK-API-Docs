@@ -2994,5 +2994,4 @@ components:
                 - delivered
             status_date:
               type: string
-              format: date-time
-              description: The date and time when the status was set.
+              description: The date and time when the status was set (Y-m-d H:i:s).
