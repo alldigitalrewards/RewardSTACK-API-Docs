@@ -2967,3 +2967,31 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BatchTransactionCollectionItem'
+    ShippingData:
+      type: object
+      description: Shipping tracking information for a transaction item.
+      properties:
+        guid:
+          type: string
+          format: uuid
+          description: The unique identifier for the transaction item.
+        tracking_number:
+          type: string
+          description: The shipment tracking number.
+        carrier:
+          type: string
+          description: The shipping carrier (e.g., UPS, FedEx, USPS).
+        status:
+          type: object
+          description: The current shipping status.
+          properties:
+            status:
+              type: string
+              description: The delivery status of the shipment.
+              enum:
+                - processing
+                - shipped
+                - delivered
+            status_date:
+              type: string
+              description: The date and time when the status was set (Y-m-d H:i:s).
