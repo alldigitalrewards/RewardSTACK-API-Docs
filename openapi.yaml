@@ -28,6 +28,8 @@ tags:
     description: Operations for transaction management and review.
   - name: webhook
     description: Operations for webhook management and review.
+  - name: point sharing
+    description: Share points between participants within the same program.
 paths:
   /token:
     post:
@@ -1099,6 +1101,66 @@ paths:
           description: Failed to update adjustment
         default:
           description: Unknown exception
+  /api/program/{programId}/participant/{uniqueId}/share:
+    post:
+      tags:
+        - point sharing
+      summary: Share points with another participant
+      description: >-
+        Transfer shareable points from one participant to another within the
+        same program. The sharer must have sufficient shareable points
+        (shared_credit balance) and point_sharing must be enabled on the
+        program. Both participants must be active.
+      operationId: sharePoints
+      security:
+        - Bearer: [ ]
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: uniqueId
+          in: path
+          required: true
+          description: Unique ID of the participant sharing points.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SharePointsRequest'
+        description: Point sharing request details.
+        required: true
+      responses:
+        '201':
+          description: Points shared successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharePointsResponse'
+        '400':
+          description: >-
+            Bad request. Possible reasons: insufficient shareable points,
+            recipient not found, cannot share with yourself, recipient is
+            inactive, amount must be greater than zero, or point sharing
+            is not enabled on the program.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - "Insufficient shareable points"
+        '404':
+          description: Sharer participant not found
+        default:
+          description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/sso:
     post:
       tags:
@@ -1618,6 +1680,10 @@ components:
           format: uuid
         credit:
           type: string
+          description: The participant's earned (non-shareable) point balance
+        shared_credit:
+          type: string
+          description: The participant's shareable point balance
         firstname:
           type: string
         lastname:
@@ -1697,6 +1763,13 @@ components:
           format: uuid
         credit:
           type: string
+          description: The participant's earned (non-shareable) point balance
+        shared_credit:
+          type: string
+          description: >-
+            The participant's shareable point balance. These points can be
+            shared with other participants in the same program when point
+            sharing is enabled.
         firstname:
           type: string
         lastname:
@@ -1914,6 +1987,17 @@ components:
         active:
           type: integer
           description: 1 is true 0 is false
+        point_sharing:
+          type: integer
+          description: >-
+            1 enables point sharing between participants, 0 disables it.
+            When enabled, participants can share their shareable points with
+            other participants in the same program.
+        hasShareablePoints:
+          type: boolean
+          description: >-
+            Indicates whether the program has any shareable adjustments.
+            When true, point_sharing cannot be disabled.
         contact:
           type: object
           items:
@@ -1998,6 +2082,13 @@ components:
             Options: America/New_York, America/Chicago, America/Denver,
             America/Phoenix, America/Los_Angeles, America/Anchorage,
             America/Adak, Pacific/Honolulu
+        point_sharing:
+          type: integer
+          default: 0
+          description: >-
+            1 enables point sharing between participants, 0 disables it.
+            When enabled, adjustments can be marked as shareable and
+            participants can share their shareable points with others.
     ProgramUpdate:
       type: object
       properties:
@@ -2042,6 +2133,11 @@ components:
             Options: America/New_York, America/Chicago, America/Denver,
             America/Phoenix, America/Los_Angeles, America/Anchorage,
             America/Adak, Pacific/Honolulu
+        point_sharing:
+          type: integer
+          description: >-
+            1 enables point sharing between participants, 0 disables it.
+            Cannot be disabled if shareable adjustments exist in the program.
     ProgramMetrics:
       description: Fetch simple program metrics.
       type: object
@@ -2564,6 +2660,12 @@ components:
         description:
           type: string
           description: Description visible to the participant.
+        shareable:
+          type: integer
+          description: >-
+            1 indicates the adjustment affects shareable points, 0 indicates
+            it affects earned (non-shareable) points. Shareable points can
+            be transferred to other participants when point sharing is enabled.
         created_at:
           type: string
         updated_at:
@@ -2604,6 +2706,14 @@ components:
           description: Description visible to participant.
         activity:
           type: string
+        shareable:
+          type: integer
+          default: 0
+          description: >-
+            Set to 1 to mark this adjustment as shareable. Shareable points
+            are added to the participant's shared_credit balance and can be
+            transferred to other participants. Requires point_sharing to be
+            enabled on the program. Default is 0 (non-shareable).
     PointUpdate:
       type: object
       properties:
@@ -2995,3 +3105,32 @@ components:
             status_date:
               type: string
               description: The date and time when the status was set (Y-m-d H:i:s).
+    SharePointsRequest:
+      type: object
+      description: Request body for sharing points between participants.
+      required:
+        - recipient_email
+        - amount
+      properties:
+        recipient_email:
+          type: string
+          format: email
+          description: >-
+            Email address of the participant receiving the points. Must be
+            an active participant in the same program as the sharer.
+        amount:
+          type: number
+          minimum: 0.01
+          description: >-
+            Amount of shareable points to transfer. Must be greater than zero
+            and cannot exceed the sharer's shared_credit balance.
+    SharePointsResponse:
+      type: object
+      description: Response body after successfully sharing points.
+      properties:
+        credit:
+          type: number
+          description: The sharer's remaining earned (non-shareable) point balance.
+        shared_credit:
+          type: number
+          description: The sharer's remaining shareable point balance after the transfer.
