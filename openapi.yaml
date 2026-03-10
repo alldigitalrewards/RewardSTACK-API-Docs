@@ -28,6 +28,12 @@ tags:
     description: Operations for transaction management and review.
   - name: webhook
     description: Operations for webhook management and review.
+  - name: service award
+    description: >-
+      Manage service awards for a program. Service awards allow you to
+      automatically issue rewards (points or products) to participants based on
+      milestone dates such as hire anniversaries. Awards can be configured to
+      trigger yearly or at a custom interval.
   - name: milestone
     description: Operations for milestone management and review.
   - name: activity
@@ -1406,6 +1412,370 @@ paths:
         default:
           description: Unknown exception
   
+
+  /api/program/{programId}/service-award:
+    get:
+      tags:
+        - service award
+      summary: List service awards for a program
+      operationId: getServiceAwardList
+      security:
+        - Bearer: [ ]
+      description: Returns a paginated collection of service awards configured for the specified program.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 30
+        - name: filters[active]
+          in: query
+          required: false
+          description: Filter by active status (0 or 1).
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: filters[reward_type]
+          in: query
+          required: false
+          description: Filter by reward type. 1 = points, 2 = product SKU.
+          schema:
+            type: integer
+            enum: [1, 2]
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceAward'
+        '400':
+          description: Missing or invalid program identifier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
+    post:
+      tags:
+        - service award
+      summary: Create a new service award
+      operationId: createServiceAward
+      security:
+        - Bearer: [ ]
+      description: >-
+        Create a new service award for the specified program. The award defines
+        the reward type, value, trigger schedule, and optional email notifications.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceAwardCreate'
+      responses:
+        '201':
+          description: Service award created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAward'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
+  /api/program/{programId}/service-award/{serviceAwardId}:
+    get:
+      tags:
+        - service award
+      summary: Retrieve a single service award
+      operationId: getServiceAward
+      security:
+        - Bearer: [ ]
+      description: Returns a single service award by its unique identifier.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+        - name: serviceAwardId
+          in: path
+          required: true
+          description: The unique identifier of the service award.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAward'
+        '404':
+          description: Service award not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
+    put:
+      tags:
+        - service award
+      summary: Update a service award
+      operationId: updateServiceAward
+      security:
+        - Bearer: [ ]
+      description: >-
+        Update an existing service award. Awards that have already issued
+        fulfillments cannot be modified.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+        - name: serviceAwardId
+          in: path
+          required: true
+          description: The unique identifier of the service award.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceAwardUpdate'
+      responses:
+        '200':
+          description: Service award updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAward'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '404':
+          description: Service award not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '422':
+          description: Award cannot be modified because it has completed fulfillments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
+    delete:
+      tags:
+        - service award
+      summary: Delete a service award
+      operationId: deleteServiceAward
+      security:
+        - Bearer: [ ]
+      description: Delete a service award and its associated participant data.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+        - name: serviceAwardId
+          in: path
+          required: true
+          description: The unique identifier of the service award.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Service award deleted
+        '404':
+          description: Service award not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
+  /api/program/{programId}/service-award/{serviceAwardId}/participant:
+    get:
+      tags:
+        - service award
+      summary: List participants enrolled in a service award
+      operationId: getServiceAwardParticipants
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns a paginated list of participants enrolled in the specified
+        service award, including their milestone date and fulfillment history.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+        - name: serviceAwardId
+          in: path
+          required: true
+          description: The unique identifier of the service award.
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 30
+        - name: filters[participant_id]
+          in: query
+          required: false
+          description: Filter results by a specific participant unique identifier.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceAwardParticipant'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
+    post:
+      tags:
+        - service award
+      summary: Enroll participants in a service award
+      operationId: bulkUpsertServiceAwardParticipants
+      security:
+        - Bearer: [ ]
+      description: >-
+        Enroll one or more participants in a service award by providing their
+        unique identifier and milestone date (e.g. hire date). If a participant
+        is already enrolled, their date will be updated. Participants are
+        validated against the program before enrollment. If the award has
+        issuance emails enabled, enrolled participants will receive a
+        notification.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The unique identifier of the program.
+          schema:
+            type: string
+            format: uuid
+        - name: serviceAwardId
+          in: path
+          required: true
+          description: The unique identifier of the service award.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/ServiceAwardParticipantWrite'
+            example:
+              - participant_id: "participant-unique-id-1"
+                date: "2020-03-15"
+              - participant_id: "participant-unique-id-2"
+                date: "2021-06-01"
+      responses:
+        '201':
+          description: All participants enrolled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardBulkResponse'
+        '207':
+          description: Partial success — some participants failed validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardBulkResponse'
+        '400':
+          description: Validation error (e.g. missing required fields or invalid date format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        default:
+          description: Unknown exception
   /api/program/{programId}/milestone:
     get:
       tags:
@@ -3721,3 +4091,300 @@ components:
             status_date:
               type: string
               description: The date and time when the status was set (Y-m-d H:i:s).
+    ServiceAward:
+      type: object
+      description: A service award configured for a program.
+      properties:
+        id:
+          type: string
+          format: uuid
+        program_uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Display name of the service award.
+        reward_type:
+          type: integer
+          description: 1 = points, 2 = product SKU.
+          enum: [1, 2]
+        reward_value:
+          type: string
+          description: >-
+            The reward amount. For points this is the number of points to issue.
+            For SKU this is the product SKU to fulfill.
+        is_trigger_yearly:
+          type: boolean
+          description: >-
+            When true the award triggers every year on the participant's
+            milestone date. When false it triggers once at the configured
+            interval.
+        interval:
+          type: integer
+          nullable: true
+          description: >-
+            Number of days between award triggers. Required when
+            is_trigger_yearly is false.
+        issuance_time:
+          type: string
+          nullable: true
+          description: Time of day to issue the award (HH:mm, 24-hour format).
+          example: "09:00"
+        timezone:
+          type: string
+          nullable: true
+          description: Timezone for the issuance time (e.g. America/New_York).
+        active:
+          type: integer
+          description: 1 is true 0 is false
+        issuance_email_enabled:
+          type: integer
+          description: >-
+            1 is true 0 is false. When enabled, participants receive an email
+            when they are enrolled in the award.
+        issuance_email_template:
+          type: string
+          description: HTML email template sent when a participant is enrolled.
+        fulfillment_email_template:
+          type: string
+          nullable: true
+          description: HTML email template sent when a reward is fulfilled.
+        sent_from:
+          type: string
+          nullable: true
+          description: Email address used as the sender for award notifications.
+        issuance_subject:
+          type: string
+          nullable: true
+          description: Subject line for issuance notification emails.
+        fulfillment_subject:
+          type: string
+          nullable: true
+          description: Subject line for fulfillment notification emails.
+        created_at:
+          type: string
+          description: Datetime the award was created.
+        updated_at:
+          type: string
+          description: Datetime the award was last updated.
+    ServiceAwardCreate:
+      type: object
+      required:
+        - name
+        - reward_type
+        - reward_value
+        - is_trigger_yearly
+        - active
+      properties:
+        name:
+          type: string
+          description: Display name of the service award.
+        reward_type:
+          type: integer
+          description: 1 = points, 2 = product SKU.
+          enum: [1, 2]
+        reward_value:
+          type: string
+          description: >-
+            The reward amount. For points this is the number of points to issue.
+            For SKU this is the product SKU to fulfill.
+        is_trigger_yearly:
+          type: boolean
+          description: >-
+            When true the award triggers every year on the participant's
+            milestone date. When false it triggers once at the configured
+            interval.
+        interval:
+          type: integer
+          description: >-
+            Number of days between award triggers. Required when
+            is_trigger_yearly is false.
+        active:
+          type: integer
+          description: 1 is true 0 is false
+          enum: [0, 1]
+        issuance_time:
+          type: string
+          description: Time of day to issue the award (HH:mm, 24-hour format).
+          example: "09:00"
+        timezone:
+          type: string
+          description: Timezone for the issuance time (e.g. America/New_York).
+        issuance_email_enabled:
+          type: integer
+          description: 1 is true 0 is false. Defaults to enabled.
+          default: 1
+        issuance_email_template:
+          type: string
+          description: HTML email template sent when a participant is enrolled.
+        fulfillment_email_template:
+          type: string
+          description: HTML email template sent when a reward is fulfilled.
+        sent_from:
+          type: string
+          format: email
+          description: Email address used as the sender for award notifications.
+        issuance_subject:
+          type: string
+          description: Subject line for issuance notification emails.
+        fulfillment_subject:
+          type: string
+          description: Subject line for fulfillment notification emails.
+    ServiceAwardUpdate:
+      type: object
+      description: >-
+        All fields are optional. Only include the fields you wish to change.
+        Awards that have completed fulfillments cannot be modified.
+      properties:
+        name:
+          type: string
+        reward_type:
+          type: integer
+          enum: [1, 2]
+        reward_value:
+          type: string
+        is_trigger_yearly:
+          type: boolean
+        interval:
+          type: integer
+        active:
+          type: integer
+          enum: [0, 1]
+        issuance_time:
+          type: string
+          example: "09:00"
+        timezone:
+          type: string
+        issuance_email_enabled:
+          type: integer
+        issuance_email_template:
+          type: string
+        fulfillment_email_template:
+          type: string
+        sent_from:
+          type: string
+          format: email
+        issuance_subject:
+          type: string
+        fulfillment_subject:
+          type: string
+    ServiceAwardParticipant:
+      type: object
+      description: A participant enrolled in a service award.
+      properties:
+        id:
+          type: string
+          format: uuid
+        participant_id:
+          type: string
+          format: uuid
+          description: The unique identifier of the participant.
+        service_award_id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+          description: The participant's milestone date (e.g. hire date). YYYY-MM-DD.
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        fulfillments:
+          type: array
+          description: History of reward fulfillments for this participant.
+          items:
+            $ref: '#/components/schemas/ServiceAwardFulfillment'
+        most_recent_reward_date:
+          type: string
+          format: date
+          nullable: true
+          description: Date of the most recent fulfilled reward.
+        next_reward_date:
+          type: string
+          format: date
+          nullable: true
+          description: Projected date of the next reward.
+    ServiceAwardFulfillment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        processed_at:
+          type: string
+          nullable: true
+          description: Datetime the fulfillment was processed.
+        reward:
+          type: string
+          description: The reward type label (POINTS or SKU).
+          enum:
+            - POINTS
+            - SKU
+        reward_value:
+          type: string
+        reward_status:
+          type: string
+          description: Current status of the fulfillment.
+          enum:
+            - pending
+            - processed
+            - failed
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    ServiceAwardParticipantWrite:
+      type: object
+      required:
+        - participant_id
+        - date
+      properties:
+        participant_id:
+          type: string
+          description: The unique identifier of the participant to enroll.
+        date:
+          type: string
+          format: date
+          description: >-
+            The participant's milestone date (e.g. hire date) in YYYY-MM-DD
+            format. This date is used to calculate when rewards should be issued.
+    ServiceAwardBulkResponse:
+      type: object
+      description: Summary of a bulk participant enrollment operation.
+      properties:
+        status:
+          type: string
+          description: Overall status of the operation.
+          example: completed
+        summary:
+          type: object
+          properties:
+            total_participants:
+              type: integer
+              description: Total number of participants in the request.
+            successful:
+              type: integer
+              description: Number of participants successfully enrolled.
+            failed:
+              type: integer
+              description: Number of participants that failed validation.
+        errors:
+          type: array
+          description: Details about failed enrollments. Empty when all succeed.
+          items:
+            type: object
+            properties:
+              participant_id:
+                type: string
+              error_type:
+                type: string
+                description: Category of the error.
+                enum:
+                  - validation_error
+                  - email_processing_error
+              error_message:
+                type: string
