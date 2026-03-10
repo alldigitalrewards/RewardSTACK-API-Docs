@@ -1,6 +1,6 @@
 openapi: 3.0.0
 info:
-  version: '2.12'
+  version: '2.13'
   title: ADR Marketplace Platform
   description: ADR marketplace management API.
   contact:
@@ -2803,25 +2803,17 @@ components:
           type: integer
           description: 1 is true 0 is false
         contact:
-          type: object
-          items:
-            $ref: '#/components/schemas/Contact'
+          $ref: '#/components/schemas/Contact'
         accounting_contact:
-          type: object
-          items:
-            $ref: '#/components/schemas/AccountingContact'
+          $ref: '#/components/schemas/AccountingContact'
         productCriteria:
-          type: object
-          items:
-            $ref: '#/components/schemas/ProductCriteria'
+          $ref: '#/components/schemas/ProductCriteria'
         featured_products:
           type: array
           items:
             $ref: '#/components/schemas/ProductSku'
         auto_redemption:
-          type: object
-          items:
-            $ref: '#/components/schemas/AutoRedemption'
+          $ref: '#/components/schemas/AutoRedemption'
         one_time_auto_redemption:
           type: array
           items:
@@ -2831,9 +2823,7 @@ components:
           items:
             $ref: '#/components/schemas/ProgramType'
         actions:
-          type: object
-          items:
-            $ref: '#/components/schemas/Actions'
+          $ref: '#/components/schemas/Actions'
     ProgramCreate:
       type: object
       required:
@@ -3261,13 +3251,9 @@ components:
           type: integer
           description: 1 for true 0 for false
         category:
-          type: object
-          items:
-            $ref: '#/components/schemas/Category'
+          $ref: '#/components/schemas/Category'
         brand:
-          type: object
-          items:
-            $ref: '#/components/schemas/Category'
+          $ref: '#/components/schemas/Category'
         group:
           type: array
           items:
