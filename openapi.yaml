@@ -1,6 +1,6 @@
 openapi: 3.0.0
 info:
-  version: '2.13'
+  version: '2.14.1'
   title: ADR Marketplace Platform
   description: ADR marketplace management API.
   contact:
@@ -18,13 +18,13 @@ tags:
     description: Operations for organization management and review.
   - name: program
     description: Operations for program management and review.
-  - name: participant
+  - name: Participant
     description: Operations for participant management and review.
-  - name: point adjustment
+  - name: Participant > Point Adjustment
     description: Credit or Debit Points from Participants.
-  - name: SSO
+  - name: Participant > SSO
     description: Generate Single Sign On URL for Participants.
-  - name: transaction
+  - name: Participant > Transaction
     description: Operations for transaction management and review.
   - name: webhook
     description: Operations for webhook management and review.
@@ -34,11 +34,11 @@ tags:
       automatically issue rewards (points or products) to participants based on
       milestone dates such as hire anniversaries. Awards can be configured to
       trigger yearly or at a custom interval.
-  - name: milestone
+  - name: Milestone
     description: Operations for milestone management and review.
-  - name: activity
+  - name: Milestone > Activity
     description: Operations for milestone activity management.
-  - name: participant progress
+  - name: Milestone > Participant Progress
     description: Operations for participant milestone progress tracking.
 paths:
   /token:
@@ -587,7 +587,7 @@ paths:
   /api/program/{programId}/participant:
     get:
       tags:
-        - participant
+        - Participant
       summary: Retrieve user collection with optional filters
       operationId: getParticipantList
       security:
@@ -631,7 +631,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - participant
+        - Participant
       summary: Add a new user.
       operationId: addUser
       security:
@@ -654,7 +654,7 @@ paths:
   /api/program/{programId}/participant/list:
     post:
       tags:
-        - participant
+        - Participant
       summary: Bulk Fetch Participants by Unique ID
       operationId: getBulkParticipantList
       security:
@@ -689,7 +689,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}:
     get:
       tags:
-        - participant
+        - Participant
       summary: Find a user by ID
       operationId: getUser
       security:
@@ -719,7 +719,7 @@ paths:
                 $ref: '#/components/schemas/ParticipantRead'
     put:
       tags:
-        - participant
+        - Participant
       summary: Updates a user.
       operationId: updateUser
       security:
@@ -752,7 +752,7 @@ paths:
           description: Unknown exception
     delete:
       tags:
-        - participant
+        - Participant
       summary: Delete user by ID setting to inactive
       operationId: deleteUser
       security:
@@ -779,7 +779,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/transaction:
     get:
       tags:
-        - transaction
+        - Participant > Transaction
       summary: Retrieve list of user transactions
       operationId: getTransactionList
       security:
@@ -823,7 +823,7 @@ paths:
           description: No transactions found.
     post:
       tags:
-        - transaction
+        - Participant > Transaction
       summary: Add a new user transaction.
       operationId: addTransaction
       security:
@@ -868,7 +868,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}:
     get:
       tags:
-        - transaction
+        - Participant > Transaction
       summary: Retrieve a single transaction
       operationId: getTransaction
       security:
@@ -908,7 +908,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}/meta:
     patch:
       tags:
-        - transaction
+        - Participant > Transaction
       summary: Add or Update one or more meta key pair values.
       operationId: patchTransactionMeta
       security:
@@ -950,7 +950,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}/return/{itemGuid}:
     get:
       tags:
-        - transaction
+        - Participant > Transaction
       summary: Retrieve a return
       operationId: getReturn
       security:
@@ -997,7 +997,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/adjustment:
     get:
       tags:
-        - point adjustment
+        - Participant > Point Adjustment
       summary: Retrieve list of user transactions
       operationId: getAdjustmentList
       security:
@@ -1029,7 +1029,7 @@ paths:
                   $ref: '#/components/schemas/PointRead'
     post:
       tags:
-        - point adjustment
+        - Participant > Point Adjustment
       summary: Add user point adjustment.
       operationId: addAdjustment
       security:
@@ -1064,7 +1064,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/adjustment/{adjustmentId}:
     patch:
       tags:
-        - point adjustment
+        - Participant > Point Adjustment
       summary: Update an existing point Adjustment
       description: >-
         Update an existing point Adjustment.  No single property in the body is
@@ -1114,7 +1114,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/sso:
     post:
       tags:
-        - SSO
+        - Participant > SSO
       summary: Create a Single Sign On token for a participant.
       operationId: generateSSOToken
       security:
@@ -1169,7 +1169,7 @@ paths:
           description: Unknown exception
     get:
       tags:
-        - SSO
+        - Participant > SSO
       summary: Validate a participant SSO token
       description: Returns a participant object.
       operationId: validateSSOToken
@@ -1207,7 +1207,7 @@ paths:
   /api/program/{programId}/participant/{uniqueId}/meta:
     put:
       tags:
-        - participant
+        - Participant
       summary: Replace all participant metadata.
       description: Replace all participant metadata.
       operationId: putParticipantMeta
@@ -1235,7 +1235,7 @@ paths:
           description: successful operation
     patch:
       tags:
-        - participant
+        - Participant
       summary: Add or Update one or more meta key pair values.
       operationId: patchParticipantMeta
       security:
@@ -1751,9 +1751,9 @@ paths:
               items:
                 $ref: '#/components/schemas/ServiceAwardParticipantWrite'
             example:
-              - participant_id: "participant-unique-id-1"
+              - Participant_id: "participant-unique-id-1"
                 date: "2020-03-15"
-              - participant_id: "participant-unique-id-2"
+              - Participant_id: "participant-unique-id-2"
                 date: "2021-06-01"
       responses:
         '201':
@@ -1779,7 +1779,7 @@ paths:
   /api/program/{programId}/milestone:
     get:
       tags:
-        - milestone
+        - Milestone
       summary: Retrieve milestone collection with optional filters
       operationId: getMilestoneList
       security:
@@ -1829,7 +1829,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - milestone
+        - Milestone
       summary: Add a new milestone.
       operationId: addMilestone
       security:
@@ -1861,7 +1861,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}:
     get:
       tags:
-        - milestone
+        - Milestone
       summary: Find a milestone by ID
       operationId: getMilestone
       security:
@@ -1895,7 +1895,7 @@ paths:
           description: Unknown exception
     patch:
       tags:
-        - milestone
+        - Milestone
       summary: Updates a milestone.
       operationId: updateMilestone
       security:
@@ -1936,7 +1936,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/activity:
     post:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Add a new activity to a milestone.
       operationId: addActivity
       security:
@@ -1974,7 +1974,7 @@ paths:
           description: Unknown exception
     get:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Retrieve all activities for a milestone
       operationId: getActivityList
       security:
@@ -2010,7 +2010,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/activity/{activityId}:
     patch:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Updates an activity.
       operationId: updateActivity
       security:
@@ -2057,7 +2057,7 @@ paths:
           description: Unknown exception
     delete:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Delete activity by ID
       operationId: deleteActivity
       security:
@@ -2095,7 +2095,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/participant:
     get:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Retrieve list of participant progress for a milestone
       operationId: getParticipantProgressList
       security:
@@ -2143,7 +2143,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Bulk upsert participant progress
       operationId: bulkUpsertParticipantProgress
       security:
@@ -2172,9 +2172,9 @@ paths:
               items:
                 type: string
               example:
-                - participant-unique-id-1
-                - participant-unique-id-2
-                - participant-unique-id-3
+                - Participant-unique-id-1
+                - Participant-unique-id-2
+                - Participant-unique-id-3
         description: Array of participant unique IDs to create or update progress for.
         required: true
       responses:
@@ -2195,7 +2195,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/participant/{participantId}:
     get:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Retrieve detailed progress for a specific participant
       operationId: getParticipantProgress
       security:
@@ -2236,7 +2236,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/participants/{participantId}/activity/{activityId}:
     patch:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Mark an activity as complete or incomplete for a participant
       operationId: updateActivityCompletion
       security:
@@ -4326,7 +4326,7 @@ components:
     ServiceAwardParticipantWrite:
       type: object
       required:
-        - participant_id
+        - Participant_id
         - date
       properties:
         participant_id:
