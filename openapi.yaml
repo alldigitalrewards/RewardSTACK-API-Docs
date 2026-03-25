@@ -1,4 +1,4 @@
-openapi: 3.0.0
+openapi: 3.1.1
 info:
   version: '2.14.3'
   title: ADR Marketplace Platform
@@ -2700,8 +2700,9 @@ components:
           type: string
           description: Last update timestamp (Y-m-d H:i:s).
         deactivated_at:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Deactivation timestamp (Y-m-d H:i:s), null if active.
         program:
           type: string
@@ -2813,8 +2814,9 @@ components:
           type: string
           description: Last update timestamp (Y-m-d H:i:s).
         deactivated_at:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Deactivation timestamp, null if active.
         address:
           $ref: '#/components/schemas/Address'
@@ -2878,8 +2880,9 @@ components:
           enum: [0, 1]
           default: 0
         grace_period:
-          type: integer
-          nullable: true
+          type:
+            - "integer"
+            - "null"
           description: The number of days after end_date that the program remains active.
         timezone:
           type: string
@@ -2907,8 +2910,9 @@ components:
           type: string
           description: Program status derived from active field.
         meta:
-          type: array
-          nullable: true
+          type:
+            - "array"
+            - "null"
           items:
             $ref: '#/components/schemas/Meta'
     ProgramRead:
@@ -2958,8 +2962,9 @@ components:
           enum: [0, 1]
           default: 0
         grace_period:
-          type: integer
-          nullable: true
+          type:
+            - "integer"
+            - "null"
           description: The number of days after end_date that the program remains active.
         timezone:
           type: string
@@ -2991,8 +2996,9 @@ components:
             id:
               type: integer
         meta:
-          type: array
-          nullable: true
+          type:
+            - "array"
+            - "null"
           items:
             $ref: '#/components/schemas/Meta'
         cost_center_id:
@@ -3000,8 +3006,9 @@ components:
           description: Cost center identifier.
           maxLength: 45
         accounting_id:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Accounting identifier. Only superadmin/accounting roles can set this.
           maxLength: 45
         deposit_amount:
@@ -3133,8 +3140,9 @@ components:
           description: Cost center identifier.
           maxLength: 45
         accounting_id:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Accounting identifier. Only superadmin/accounting roles can set this.
           maxLength: 45
         contact:
@@ -3233,8 +3241,9 @@ components:
           type: string
           maxLength: 45
         accounting_id:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Only superadmin/accounting roles can modify this.
           maxLength: 45
         contact:
@@ -3306,8 +3315,9 @@ components:
           description: 1 for active, 0 for inactive.
           enum: [0, 1]
         parent:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Parent organization unique_id.
         domains:
           type: array
@@ -3330,8 +3340,9 @@ components:
           minLength: 2
           maxLength: 45
         parent:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: The parent organization unique_id.
         name:
           type: string
@@ -3453,19 +3464,22 @@ components:
           minLength: 1
           maxLength: 255
         auth_type:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Authentication type for the webhook endpoint.
           enum:
             - Bearer
             - Basic
         username:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Username for basic authentication.
         password:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Password for basic authentication.
         active:
           type: integer
@@ -3491,8 +3505,9 @@ components:
           type: string
           description: Which event triggers this webhook.
         auth_type:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Authentication type (Bearer or Basic).
         active:
           type: integer
@@ -3815,19 +3830,23 @@ components:
           type: string
           description: Last update timestamp (Y-m-d H:i:s).
         transaction_id:
-          type: integer
-          nullable: true
+          type:
+            - "integer"
+            - "null"
           description: Associated transaction ID, null for manual adjustments.
         transaction_item_id:
-          type: integer
-          nullable: true
+          type:
+            - "integer"
+            - "null"
         completed_at:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Date the activity was completed (YYYY-MM-DD).
         activity:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Activity label for the adjustment.
         status:
           type: string
@@ -4306,19 +4325,22 @@ components:
         price_ranged:
           type: boolean
         price:
-          type: number
+          type:
+            - "number"
+            - "null"
           format: float
-          nullable: true
           description: Present when `price_ranged` is `false`.
         price_min:
-          type: number
+          type:
+            - "number"
+            - "null"
           format: float
-          nullable: true
           description: Present when `price_ranged` is `true`.
         price_max:
-          type: number
+          type:
+            - "number"
+            - "null"
           format: float
-          nullable: true
           description: Present when `price_ranged` is `true`.
         category:
           type: object
@@ -4669,19 +4691,22 @@ components:
             milestone date. When false it triggers once at the configured
             interval.
         interval:
-          type: integer
-          nullable: true
+          type:
+            - "integer"
+            - "null"
           description: >-
             Number of days between award triggers. Required when
             is_trigger_yearly is false.
         issuance_time:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Time of day to issue the award (HH:mm, 24-hour format).
           example: "09:00"
         timezone:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Timezone for the issuance time (e.g. America/New_York).
         active:
           type: integer
@@ -4695,20 +4720,24 @@ components:
           type: string
           description: HTML email template sent when a participant is enrolled.
         fulfillment_email_template:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: HTML email template sent when a reward is fulfilled.
         sent_from:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Email address used as the sender for award notifications.
         issuance_subject:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Subject line for issuance notification emails.
         fulfillment_subject:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Subject line for fulfillment notification emails.
         created_at:
           type: string
@@ -4845,14 +4874,16 @@ components:
           items:
             $ref: '#/components/schemas/ServiceAwardFulfillment'
         most_recent_reward_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           format: date
-          nullable: true
           description: Date of the most recent fulfilled reward.
         next_reward_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           format: date
-          nullable: true
           description: Projected date of the next reward.
     ServiceAwardFulfillment:
       type: object
@@ -4864,8 +4895,9 @@ components:
           type: string
           format: date
         processed_at:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Datetime the fulfillment was processed.
         reward:
           type: string
