@@ -1,6 +1,6 @@
 openapi: 3.0.0
 info:
-  version: '2.14.1'
+  version: '2.14.3'
   title: ADR Marketplace Platform
   description: ADR marketplace management API.
   contact:
