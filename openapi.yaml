@@ -11,13 +11,15 @@ servers:
   - url: https://admin.alldigitalrewards.com
     description: Production environment
 tags:
-  - name: token
+  - name: Token
     description: >-
       Generate a JSON Web Token for use in API access. This token is valid
       for 2 hours after creation by default.
-  - name: organization
+  - name: Organization
     description: Operations for organization management and review.
-  - name: program
+  - name: Organization > Webhook
+    description: Operations for webhook management and review.
+  - name: Program
     description: Operations for program management and review.
   - name: Participant
     description: Operations for participant management and review.
@@ -27,21 +29,19 @@ tags:
     description: Generate Single Sign On URL for Participants.
   - name: Participant > Transaction
     description: Operations for transaction management and review.
-  - name: webhook
-    description: Operations for webhook management and review.
-  - name: catalog
+  - name: Program > Catalog
     description: Search and browse the product catalog for a program.
-  - name: service award
+  - name: Service Award
     description: >-
       Manage service awards for a program. Service awards allow you to
       automatically issue rewards (points or products) to participants based on
       milestone dates such as hire anniversaries. Awards can be configured to
       trigger yearly or at a custom interval.
-  - name: milestone
+  - name: Milestone
     description: Operations for milestone management and review.
-  - name: activity
+  - name: Milestone > Activity
     description: Operations for milestone activity management.
-  - name: participant progress
+  - name: Milestone > Participant Progress
     description: Operations for participant milestone progress tracking.
   - name: Batch
     description: Batch operations for creating multiple resources at once.
@@ -49,7 +49,7 @@ paths:
   /token:
     post:
       tags:
-        - token
+        - Token
       summary: Use Basic authentication to generate a new JWT for use in API access
       operationId: generateToken
       security:
@@ -100,7 +100,7 @@ paths:
   /api/organization:
     get:
       tags:
-        - organization
+        - Organization
       summary: Retrieve organization collection with optional filters
       operationId: getOrganizationList
       security:
@@ -147,7 +147,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - organization
+        - Organization
       summary: Add a new organization.
       operationId: addOrganization
       security:
@@ -182,7 +182,7 @@ paths:
   /api/organization/{uniqueId}:
     get:
       tags:
-        - organization
+        - Organization
       operationId: getOrganization
       security:
         - Bearer: [ ]
@@ -206,7 +206,7 @@ paths:
           description: Organization not found
     put:
       tags:
-        - organization
+        - Organization
       summary: Update an organization.
       operationId: updateOrganization
       security:
@@ -248,7 +248,7 @@ paths:
   /api/organization/{orgId}/webhooks:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: listWebhooks
       security:
         - Bearer: [ ]
@@ -274,7 +274,7 @@ paths:
           description: Organization not found.
     post:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: createWebhook
       security:
         - Bearer: [ ]
@@ -297,7 +297,7 @@ paths:
   /api/organization/{orgId}/webhooks/{webhookId}:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: getWebhook
       security:
         - Bearer: [ ]
@@ -327,7 +327,7 @@ paths:
           description: Webhook not found.
     put:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: updateWebhook
       security:
         - Bearer: [ ]
@@ -358,7 +358,7 @@ paths:
   /api/organization/{orgId}/webhooks/{webhookId}/logs:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: getWebhookLogs
       security:
         - Bearer: [ ]
@@ -405,7 +405,7 @@ paths:
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: viewWebhookLog
       security:
         - Bearer: [ ]
@@ -442,7 +442,7 @@ paths:
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}/replay:
     post:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: replayWebhookLog
       security:
         - Bearer: [ ]
@@ -480,7 +480,7 @@ paths:
   /api/program:
     get:
       tags:
-        - program
+        - Program
       summary: Retrieve program collection with optional filters
       operationId: getProgramList
       security:
@@ -547,7 +547,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - program
+        - Program
       summary: Add a new program.
       operationId: addProgram
       security:
@@ -573,7 +573,7 @@ paths:
   /api/program/{uniqueId}:
     get:
       tags:
-        - program
+        - Program
       summary: Find a program by ID
       operationId: getProgram
       security:
@@ -605,7 +605,7 @@ paths:
           description: Unknown exception
     put:
       tags:
-        - program
+        - Program
       summary: Update a program.
       operationId: updateProgram
       security:
@@ -638,7 +638,7 @@ paths:
   /api/program/{uniqueId}/metrics:
     get:
       tags:
-        - program
+        - Program
       summary: Fetch basic program metrics
       operationId: getProgramMetrics
       security:
@@ -1495,7 +1495,7 @@ paths:
   /api/program/{programId}/catalog:
     get:
       tags:
-        - catalog
+        - Program > Catalog
       summary: Catalog Search
       operationId: CatalogSearch
       description: Returns a paginated collection of products for the specified program.
@@ -1648,7 +1648,7 @@ paths:
   /api/program/{programId}/service-award:
     get:
       tags:
-        - service award
+        - Service Award
       summary: List service awards for a program
       operationId: getServiceAwardList
       security:
@@ -1711,7 +1711,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - service award
+        - Service Award
       summary: Create a new service award
       operationId: createServiceAward
       security:
@@ -1751,7 +1751,7 @@ paths:
   /api/program/{programId}/service-award/{serviceAwardId}:
     get:
       tags:
-        - service award
+        - Service Award
       summary: Retrieve a single service award
       operationId: getServiceAward
       security:
@@ -1789,7 +1789,7 @@ paths:
           description: Unknown exception
     put:
       tags:
-        - service award
+        - Service Award
       summary: Update a service award
       operationId: updateServiceAward
       security:
@@ -1847,7 +1847,7 @@ paths:
           description: Unknown exception
     delete:
       tags:
-        - service award
+        - Service Award
       summary: Delete a service award
       operationId: deleteServiceAward
       security:
@@ -1882,7 +1882,7 @@ paths:
   /api/program/{programId}/service-award/{serviceAwardId}/participant:
     get:
       tags:
-        - service award
+        - Service Award
       summary: List participants enrolled in a service award
       operationId: getServiceAwardParticipants
       security:
@@ -1947,7 +1947,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - service award
+        - Service Award
       summary: Enroll participants in a service award
       operationId: bulkUpsertServiceAwardParticipants
       security:
@@ -2011,7 +2011,7 @@ paths:
   /api/program/{programId}/milestone:
     get:
       tags:
-        - milestone
+        - Milestone
       summary: Retrieve milestone collection with optional filters
       operationId: getMilestoneList
       security:
@@ -2061,7 +2061,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - milestone
+        - Milestone
       summary: Add a new milestone.
       operationId: addMilestone
       security:
@@ -2093,7 +2093,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}:
     get:
       tags:
-        - milestone
+        - Milestone
       summary: Find a milestone by ID
       operationId: getMilestone
       security:
@@ -2127,7 +2127,7 @@ paths:
           description: Unknown exception
     patch:
       tags:
-        - milestone
+        - Milestone
       summary: Updates a milestone.
       operationId: updateMilestone
       security:
@@ -2168,7 +2168,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/activity:
     post:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Add a new activity to a milestone.
       operationId: addActivity
       security:
@@ -2206,7 +2206,7 @@ paths:
           description: Unknown exception
     get:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Retrieve all activities for a milestone
       operationId: getActivityList
       security:
@@ -2242,7 +2242,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/activity/{activityId}:
     patch:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Updates an activity.
       operationId: updateActivity
       security:
@@ -2289,7 +2289,7 @@ paths:
           description: Unknown exception
     delete:
       tags:
-        - activity
+        - Milestone > Activity
       summary: Delete activity by ID
       operationId: deleteActivity
       security:
@@ -2327,7 +2327,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/participant:
     get:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Retrieve list of participant progress for a milestone
       operationId: getParticipantProgressList
       security:
@@ -2375,7 +2375,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Bulk upsert participant progress
       operationId: bulkUpsertParticipantProgress
       security:
@@ -2427,7 +2427,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/participant/{participantId}:
     get:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Retrieve detailed progress for a specific participant
       operationId: getParticipantProgress
       security:
@@ -2468,7 +2468,7 @@ paths:
   /api/program/{programId}/milestone/{milestoneId}/participants/{participantId}/activity/{activityId}:
     patch:
       tags:
-        - participant progress
+        - Milestone > Participant Progress
       summary: Mark an activity as complete or incomplete for a participant
       operationId: updateActivityCompletion
       security:
@@ -3048,7 +3048,7 @@ components:
         - unique_id
         - name
         - point
-        - organization
+        - Organization
       properties:
         unique_id:
           type: string
