@@ -1,6 +1,6 @@
 openapi: 3.0.0
 info:
-  version: '2.14.1'
+  version: '2.14.3'
   title: ADR Marketplace Platform
   description: ADR marketplace management API.
   contact:
@@ -11,12 +11,15 @@ servers:
   - url: https://admin.alldigitalrewards.com
     description: Production environment
 tags:
-  - name: token
+  - name: Token
     description: >-
-      Generate a JSON Web Token for use in API access.  This token is valid for 2 hours after creation.
-  - name: organization
+      Generate a JSON Web Token for use in API access. This token is valid
+      for 2 hours after creation by default.
+  - name: Organization
     description: Operations for organization management and review.
-  - name: program
+  - name: Organization > Webhook
+    description: Operations for webhook management and review.
+  - name: Program
     description: Operations for program management and review.
   - name: Participant
     description: Operations for participant management and review.
@@ -26,9 +29,9 @@ tags:
     description: Generate Single Sign On URL for Participants.
   - name: Participant > Transaction
     description: Operations for transaction management and review.
-  - name: webhook
-    description: Operations for webhook management and review.
-  - name: service award
+  - name: Program > Catalog
+    description: Search and browse the product catalog for a program.
+  - name: Service Award
     description: >-
       Manage service awards for a program. Service awards allow you to
       automatically issue rewards (points or products) to participants based on
@@ -40,27 +43,52 @@ tags:
     description: Operations for milestone activity management.
   - name: Milestone > Participant Progress
     description: Operations for participant milestone progress tracking.
+  - name: Batch
+    description: Batch operations for creating multiple resources at once.
 paths:
   /token:
     post:
       tags:
-        - token
+        - Token
       summary: Use Basic authentication to generate a new JWT for use in API access
       operationId: generateToken
       security:
         - BasicAuth: [ ]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/JwtRequest'
+      parameters:
+        - name: hoursUntilExpiry
+          in: query
+          required: false
+          description: Number of hours until the token expires.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8760
+            default: 2
+        - name: tokenName
+          in: query
+          required: false
+          description: Optional name for the token.
+          schema:
+            type: string
+            maxLength: 255
       responses:
-        '200':
+        '201':
           description: JWT is returned
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/JwtResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - "The hoursUntilExpiry parameter must be an integer."
+                  - "The maximum token duration is 8760 hours (1 year)."
         '401':
           description: Unauthorized Response
           content:
@@ -72,7 +100,7 @@ paths:
   /api/organization:
     get:
       tags:
-        - organization
+        - Organization
       summary: Retrieve organization collection with optional filters
       operationId: getOrganizationList
       security:
@@ -85,7 +113,6 @@ paths:
           description: Return all children organizations of this parent unique identifier.
           schema:
             type: string
-            format: uuid
         - name: name
           in: query
           required: false
@@ -98,6 +125,8 @@ paths:
           description: Request a specific page number starting with page 1.
           schema:
             type: integer
+            minimum: 1
+            default: 1
         - name: limit
           in: query
           required: false
@@ -118,7 +147,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - organization
+        - Organization
       summary: Add a new organization.
       operationId: addOrganization
       security:
@@ -137,25 +166,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationRead'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    type: object
         default:
           description: Unknown exception
   /api/organization/{uniqueId}:
     get:
       tags:
-        - organization
+        - Organization
       operationId: getOrganization
       security:
         - Bearer: [ ]
-      summary: Find a organization by ID
+      summary: Find an organization by ID
       description: Returns a single organization.
       parameters:
         - name: uniqueId
           in: path
           required: true
-          description: The organization domain or id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -163,10 +202,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationRead'
+        '404':
+          description: Organization not found
     put:
       tags:
-        - organization
-      summary: Updates a organization.
+        - Organization
+      summary: Update an organization.
       operationId: updateOrganization
       security:
         - Bearer: [ ]
@@ -174,16 +215,15 @@ paths:
         - name: uniqueId
           in: path
           required: true
-          description: The organization domain or id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/OrganizationUpdate'
-        description: Organization object to add to the marketplace.
+        description: Organization properties to update. Only include fields you wish to change.
         required: true
       responses:
         '200':
@@ -192,25 +232,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationRead'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    type: object
         default:
           description: Unknown exception
   /api/organization/{orgId}/webhooks:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: listWebhooks
       security:
         - Bearer: [ ]
       summary: List organization webhooks
-      description: Returns a list of configured webhooks
+      description: Returns a list of configured webhooks.
       parameters:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -220,9 +270,11 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/WebhookRead'
+        '404':
+          description: Organization not found.
     post:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: createWebhook
       security:
         - Bearer: [ ]
@@ -232,10 +284,9 @@ paths:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
       requestBody:
         $ref: '#/components/requestBodies/WebhookCreate'
       responses:
@@ -246,7 +297,7 @@ paths:
   /api/organization/{orgId}/webhooks/{webhookId}:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: getWebhook
       security:
         - Bearer: [ ]
@@ -256,14 +307,13 @@ paths:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
         - name: webhookId
           in: path
           required: true
-          description: Webhook Unique ID
+          description: Webhook ID.
           schema:
             type: integer
       responses:
@@ -277,24 +327,23 @@ paths:
           description: Webhook not found.
     put:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: updateWebhook
       security:
         - Bearer: [ ]
       summary: Update a webhook
-      description: Update a webhook.
+      description: Update a webhook. Immutable webhooks cannot be modified.
       parameters:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
         - name: webhookId
           in: path
           required: true
-          description: Webhook Unique ID
+          description: Webhook ID.
           schema:
             type: integer
       requestBody:
@@ -303,39 +352,33 @@ paths:
         '204':
           description: successful operation
         '400':
-          description: Invalid properties sent.
+          description: Invalid properties sent or webhook is immutable.
         '404':
           description: Webhook not found.
   /api/organization/{orgId}/webhooks/{webhookId}/logs:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: getWebhookLogs
       security:
         - Bearer: [ ]
       summary: Get Webhook Logs
       description: >-
-        Returns the requested webhook webhook logs that match the provided
-        criteria. The response is limited to 100 webhooks.  The status_code
-        filter only returns the webhooks where the most recent response from the
-        configured server matches that HTTP Status code. For example:If you
-        filter by status_code=500 and five results are returned and you replay
-        the first result which then gets an HTTP Status response of 204 from the
-        configured webhook server.  If you filter by status_code=500 again you
-        will only get four results at the most recent response for the replayed
-        log is now 204 rather than 500.
+        Returns the requested webhook logs that match the provided
+        criteria. The response is limited to 100 logs per request. The status_code
+        filter only returns logs where the most recent response from the
+        configured server matches that HTTP Status code.
       parameters:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
         - name: webhookId
           in: path
           required: true
-          description: Webhook Unique ID
+          description: Webhook ID.
           schema:
             type: integer
         - name: status_code
@@ -348,8 +391,8 @@ paths:
           in: query
           required: false
           description: >-
-            The document ID (OID) of the last Webhook Log read.  The response
-            will start with the next Webhook Log in line
+            The MongoDB ObjectId of the last Webhook Log read. The response
+            will start with the next Webhook Log in line.
           schema:
             type: string
       responses:
@@ -362,32 +405,31 @@ paths:
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}:
     get:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: viewWebhookLog
       security:
         - Bearer: [ ]
       summary: View a single webhook log
-      description: View a single webhook log
+      description: View a single webhook log.
       parameters:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
         - name: webhookId
           in: path
           required: true
-          description: Webhook Unique ID
+          description: Webhook ID.
           schema:
             type: integer
         - name: webhookLogId
           in: path
           required: true
-          description: Webhook Log Document ID
+          description: Webhook Log MongoDB ObjectId.
           schema:
-            type: integer
+            type: string
       responses:
         '200':
           description: successful operation
@@ -395,38 +437,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebhookLog'
+        '404':
+          description: Webhook log not found.
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}/replay:
     post:
       tags:
-        - webhook
+        - Organization > Webhook
       operationId: replayWebhookLog
       security:
         - Bearer: [ ]
       summary: Replay Webhook Log
       description: >-
-        Replays the Webhook.  This effectly repeats the stored request exactly
-        as you see it in the viewWebhook call.  This will store the response and
+        Replays the Webhook. This repeats the stored request exactly
+        as you see it in the viewWebhookLog call. This will store the response and
         return the HTTP Status code the server gave when replaying the webhook.
       parameters:
         - name: orgId
           in: path
           required: true
-          description: The organization unique id
+          description: The organization unique_id.
           schema:
             type: string
-            format: uuid
         - name: webhookId
           in: path
           required: true
-          description: Webhook Unique ID
+          description: Webhook ID.
           schema:
             type: integer
         - name: webhookLogId
           in: path
           required: true
-          description: Webhook Log Document ID
+          description: Webhook Log MongoDB ObjectId.
           schema:
-            type: integer
+            type: string
       responses:
         '200':
           description: successful operation
@@ -437,50 +480,74 @@ paths:
   /api/program:
     get:
       tags:
-        - program
+        - Program
       summary: Retrieve program collection with optional filters
       operationId: getProgramList
       security:
         - Bearer: [ ]
-      description: Returns programr collection.
+      description: Returns program collection.
       parameters:
         - name: organization
           in: query
           required: false
-          description: Organization of program to return.
+          description: Organization unique_id to filter programs by.
           schema:
-            type: integer
-            format: int32
+            type: string
         - name: name
           in: query
           required: false
-          description: Name of program to return
+          description: Name of program to return (LIKE search).
           schema:
             type: string
         - name: active
           in: query
           required: false
-          description: Active/Inactive list of programs to return (1 or 0)
+          description: Filter by active status (1 or 0).
           schema:
             type: integer
-        - name: end_date
+            enum: [0, 1]
+        - name: published
           in: query
           required: false
-          description: Program list where end date (Y-m-d)
+          description: Filter by published status (1 or 0).
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: uri
+          in: query
+          required: false
+          description: Filter by full domain URL (subdomain.domain).
           schema:
             type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 30
       responses:
         '200':
           description: successful operation
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProgramList'
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProgramList'
         default:
           description: Unknown exception
     post:
       tags:
-        - program
+        - Program
       summary: Add a new program.
       operationId: addProgram
       security:
@@ -499,12 +566,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
+        '400':
+          description: Validation error
         default:
           description: Unknown exception
   /api/program/{uniqueId}:
     get:
       tags:
-        - program
+        - Program
       summary: Find a program by ID
       operationId: getProgram
       security:
@@ -514,10 +583,15 @@ paths:
         - name: uniqueId
           in: path
           required: true
-          description: The Program Unique Identifier
+          description: The Program unique_id or full domain (subdomain.domain).
           schema:
             type: string
-            format: uuid
+        - name: lang
+          in: query
+          required: false
+          description: Language code for product criteria localization.
+          schema:
+            type: string
       responses:
         '200':
           description: successful operation
@@ -525,12 +599,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
+        '404':
+          description: Program not found
         default:
-          description: unknwon exception
+          description: Unknown exception
     put:
       tags:
-        - program
-      summary: Updates a program.
+        - Program
+      summary: Update a program.
       operationId: updateProgram
       security:
         - Bearer: [ ]
@@ -538,16 +614,15 @@ paths:
         - name: uniqueId
           in: path
           required: true
-          description: The program domain or id
+          description: The Program unique_id or full domain (subdomain.domain).
           schema:
             type: string
-            format: uuid
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ProgramUpdate'
-        description: Program object to add to the marketplace.
+        description: Program properties to update. Only include fields you wish to change.
         required: true
       responses:
         '200':
@@ -556,12 +631,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
+        '400':
+          description: Validation error
         default:
           description: Unknown exception
   /api/program/{uniqueId}/metrics:
     get:
       tags:
-        - program
+        - Program
       summary: Fetch basic program metrics
       operationId: getProgramMetrics
       security:
@@ -571,10 +648,9 @@ paths:
         - name: uniqueId
           in: path
           required: true
-          description: The Program Unique Identifier
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -583,56 +659,103 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProgramMetrics'
         default:
-          description: unknwon exception
+          description: Unknown exception
   /api/program/{programId}/participant:
     get:
       tags:
         - Participant
-      summary: Retrieve user collection with optional filters
+      summary: Retrieve participant collection with optional filters
       operationId: getParticipantList
       security:
         - Bearer: [ ]
-      description: Returns user collection.
+      description: Returns participant collection.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
-        - name: program
-          in: query
-          required: false
-          description: Program of user to return.
-          schema:
-            type: integer
-            format: int32
         - name: name
           in: query
           required: false
-          description: First/last name of user to return.
+          description: Filter by first/last name or combined name (substring search).
           schema:
             type: string
         - name: email_address
           in: query
           required: false
-          description: Email address of user to return.
+          description: Filter by email address (substring search).
           schema:
             type: string
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by participant unique_id (prefix search).
+          schema:
+            type: string
+        - name: active
+          in: query
+          required: false
+          description: Filter by active status (0 or 1).
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: status
+          in: query
+          required: false
+          description: Filter by participant status.
+          schema:
+            $ref: '#/components/schemas/UserStatusEnum'
+        - name: points_greater_than
+          in: query
+          required: false
+          description: Filter by minimum credit balance.
+          schema:
+            type: number
+        - name: metaKey
+          in: query
+          required: false
+          description: Filter by meta data key name (use with metaValue).
+          schema:
+            type: string
+        - name: metaValue
+          in: query
+          required: false
+          description: Filter by meta data value (use with metaKey).
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 30
+            maximum: 500
       responses:
         '200':
           description: successful operation
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserList'
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserList'
         default:
           description: Unknown exception
     post:
       tags:
         - Participant
-      summary: Add a new user.
+      summary: Add a new participant.
       operationId: addUser
       security:
         - Bearer: [ ]
@@ -640,15 +763,20 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
       requestBody:
         $ref: '#/components/requestBodies/UserWrite'
       responses:
         '201':
-          description: successful operation
+          description: Participant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: Validation error
         default:
           description: Unknown exception
   /api/program/{programId}/participant/list:
@@ -659,23 +787,22 @@ paths:
       operationId: getBulkParticipantList
       security:
         - Bearer: [ ]
-      description: Returns participant collection.
+      description: Returns participant collection matching the provided unique IDs. Limited to 500 results.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ParticipantIdArray'
         description: >-
-          Array of participant_id to request.  To use this, the request header
-          content-type must be application/json
+          Array of participant_id to request. The request header
+          content-type must be application/json.
         required: true
       responses:
         '200':
@@ -683,33 +810,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserList'
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserList'
+        '400':
+          description: participant_id collection must be provided.
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}:
     get:
       tags:
         - Participant
-      summary: Find a user by ID
+      summary: Find a participant by ID
       operationId: getUser
       security:
         - Bearer: [ ]
-      description: Returns a single user.
+      description: Returns a single participant with full details including address and meta.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of participant to return.
           schema:
             type: string
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -717,70 +846,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
+        '404':
+          description: Resource does not exist.
     put:
       tags:
         - Participant
-      summary: Updates a user.
+      summary: Update a participant.
       operationId: updateUser
       security:
         - Bearer: [ ]
+      description: >-
+        Update participant properties. Cannot modify unique_id, program, organization, or credit.
+        Meta data is completely replaced (PUT semantics). Use PATCH on the /meta endpoint to merge instead.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of participant to update.
           schema:
             type: string
-            format: uuid
       requestBody:
         $ref: '#/components/requestBodies/UserWrite'
       responses:
         '200':
-          description: User updated
+          description: Participant updated
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: Validation error
         default:
           description: Unknown exception
     delete:
       tags:
         - Participant
-      summary: Delete user by ID setting to inactive
+      summary: Delete participant (GDPR PII removal)
       operationId: deleteUser
       security:
         - Bearer: [ ]
-      description: Remove User PII.
+      description: >-
+        Removes participant PII (firstname, lastname, email, phone, birthdate, address).
+        Sets status to DATADEL and active to 0. This is irreversible — no further updates
+        can be made to DATADEL participants.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to delete.
+          description: Unique ID of participant to delete.
           schema:
             type: string
-            format: uuid
       responses:
         '204':
-          description: none
+          description: Participant PII removed.
+        '404':
+          description: Participant not found.
   /api/program/{programId}/participant/{uniqueId}/transaction:
     get:
       tags:
         - Participant > Transaction
-      summary: Retrieve list of user transactions
+      summary: Retrieve list of participant transactions
       operationId: getTransactionList
       security:
         - Bearer: [ ]
@@ -789,27 +926,57 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of the participant.
           schema:
             type: string
-            format: uuid
         - name: unique_id[]
           in: query
-          description: An array of one or more transaction unique_id's
+          required: false
+          description: An array of one or more transaction unique_id's to filter by.
           schema:
-            type: string
+            type: array
+            items:
+              type: string
         - name: year
           in: query
-          description: Fileter by Year YYYY
+          required: false
+          description: Filter by year (YYYY). Must be > 2015 and <= current year.
+          schema:
+            type: integer
+            minimum: 2016
+        - name: start_date
+          in: query
+          required: false
+          description: Filter transactions from this date (Y-m-d or Y-m-d H:i:s).
           schema:
             type: string
+        - name: end_date
+          in: query
+          required: false
+          description: Filter transactions to this date (Y-m-d or Y-m-d H:i:s).
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Page number for pagination.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Number of results per page.
+          schema:
+            type: integer
+            default: 30
       responses:
         '200':
           description: successful operation
@@ -819,12 +986,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Transaction'
-        '404':
-          description: No transactions found.
+        '400':
+          description: Invalid filter parameters.
     post:
       tags:
         - Participant > Transaction
-      summary: Add a new user transaction.
+      summary: Add a new participant transaction.
       operationId: addTransaction
       security:
         - Bearer: [ ]
@@ -832,37 +999,35 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of the participant.
           schema:
             type: string
-            format: uuid
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateTransaction'
-        description: Transaction creation for user.
+        description: Transaction creation for participant.
         required: true
       responses:
         '201':
-          description: successful operation
+          description: Transaction created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
         '400':
           description: >-
-            This response will occur with an error message indicating the
-            specific issue and reason the transaction is invalid. Some examples
-            are.  If product does not exist. If participant does not have enough
-            points to transact for the reward and issue_points is not true.  If
-            address verification is enabled, a shipping address is provided and
-            it is not able to be verified. If the value of a ranged value
-            product exceeds the valid range.   If the product is out of
-            inventory.
+            Validation error. Common reasons include: product does not exist,
+            participant does not have enough points (and issue_points is not true),
+            address verification failed, ranged product value exceeds valid range,
+            product is out of inventory, participant is not active.
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}:
@@ -878,24 +1043,21 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
           description: Unique ID of the participant the transaction belongs to.
           schema:
             type: string
-            format: uuid
         - name: transactionId
           in: path
           required: true
           description: ID of Transaction.
           schema:
             type: integer
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -903,8 +1065,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Transaction'
-        '404':
-          description: No transactions found.
+        '400':
+          description: Resource does not exist.
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}/meta:
     patch:
       tags:
@@ -914,39 +1076,36 @@ paths:
       security:
         - Bearer: [ ]
       description: >-
-        Add or Update one or more meta key pair values.  The transactionId
+        Add or Update one or more meta key pair values. The transactionId
         property in the URL can either be a transaction Item GUID or a
-        Transaction ID (integer).  Either will identify the correct transaction
+        Transaction ID (integer). Either will identify the correct transaction
         and add the appropriate metadata.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
           description: Unique ID of the participant the transaction belongs to.
           schema:
             type: string
-            format: uuid
         - name: transactionId
           in: path
           required: true
-          description: ID of Transaction.
+          description: Transaction ID (integer) or Transaction Item GUID (string).
           schema:
             type: string
-            format: uuid
       requestBody:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '202':
           description: successful operation
         '400':
-          description: Resource does not exist
+          description: Invalid meta or resource does not exist.
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}/return/{itemGuid}:
     get:
       tags:
@@ -955,36 +1114,32 @@ paths:
       operationId: getReturn
       security:
         - Bearer: [ ]
-      description: Returns a return.
+      description: Returns a transaction item return record.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
           description: Unique ID of the participant the transaction belongs to.
           schema:
             type: string
-            format: uuid
         - name: transactionId
           in: path
           required: true
           description: ID of Transaction.
           schema:
             type: integer
-            format: uuid
         - name: itemGuid
           in: path
           required: true
-          description: ID of Transaction Item.
+          description: GUID of Transaction Item.
           schema:
             type: string
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -993,31 +1148,105 @@ paths:
               schema:
                 $ref: '#/components/schemas/ReturnRead'
         '404':
-          description: Resource does not exist
-  /api/program/{programId}/participant/{uniqueId}/adjustment:
-    get:
+          description: Resource does not exist.
+    post:
       tags:
-        - Participant > Point Adjustment
-      summary: Retrieve list of user transactions
-      operationId: getAdjustmentList
+        - Participant > Transaction
+      summary: Create a return for a transaction item
+      operationId: createReturn
       security:
         - Bearer: [ ]
-      description: Returns a transaction collection.
+      description: Issue a return for a transaction item. Each item can only be returned once.
       parameters:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of the participant the transaction belongs to.
           schema:
             type: string
-            format: uuid
+        - name: transactionId
+          in: path
+          required: true
+          description: ID of Transaction.
+          schema:
+            type: integer
+        - name: itemGuid
+          in: path
+          required: true
+          description: GUID of Transaction Item to return.
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes:
+                  type: string
+                  description: Optional notes for the return.
+      responses:
+        '201':
+          description: Return created.
+        '400':
+          description: Item already returned or invalid request.
+        '404':
+          description: Resource does not exist.
+  /api/program/{programId}/participant/{uniqueId}/adjustment:
+    get:
+      tags:
+        - Participant > Point Adjustment
+      summary: Retrieve list of participant adjustments
+      operationId: getAdjustmentList
+      security:
+        - Bearer: [ ]
+      description: Returns an adjustment collection.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: uniqueId
+          in: path
+          required: true
+          description: Unique ID of the participant.
+          schema:
+            type: string
+        - name: start_date
+          in: query
+          required: false
+          description: Filter adjustments from this date (Y-m-d or Y-m-d H:i:s).
+          schema:
+            type: string
+        - name: end_date
+          in: query
+          required: false
+          description: Filter adjustments to this date (Y-m-d or Y-m-d H:i:s).
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Page number for pagination.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Number of results per page.
+          schema:
+            type: integer
+            default: 30
       responses:
         '200':
           description: successful operation
@@ -1027,10 +1256,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/PointRead'
+        '400':
+          description: Invalid date format.
     post:
       tags:
         - Participant > Point Adjustment
-      summary: Add user point adjustment.
+      summary: Add participant point adjustment.
       operationId: addAdjustment
       security:
         - Bearer: [ ]
@@ -1038,38 +1269,40 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of the participant.
           schema:
             type: string
-            format: uuid
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/PointWrite'
-        description: Adjustment creation for user.
+        description: Adjustment creation for participant.
         required: true
       responses:
         '201':
-          description: successful operation
+          description: Adjustment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PointReadWithUser'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/adjustment/{adjustmentId}:
     patch:
       tags:
         - Participant > Point Adjustment
-      summary: Update an existing point Adjustment
+      summary: Update an existing point adjustment
       description: >-
-        Update an existing point Adjustment.  No single property in the body is
-        required when updating an adjustment.  All properties not listed here
-        will be ignored.
+        Update an existing point adjustment. No single property in the body is
+        required when updating. All properties not listed here will be ignored.
+        Only metadata fields can be updated — amount and type cannot be changed.
       operationId: patchAdjustment
       security:
         - Bearer: [ ]
@@ -1077,38 +1310,33 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
           description: Unique ID of participant that owns the adjustment.
           schema:
             type: string
-            format: uuid
         - name: adjustmentId
           in: path
           required: true
           description: ID of adjustment.
           schema:
             type: integer
-            format: uuid
       requestBody:
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/PointUpdate'
-        description: Adjustment creation for user.
+        description: Adjustment properties to update.
         required: true
       responses:
         '202':
           description: Successful operation
         '404':
           description: Adjustment not found.
-        '500':
-          description: Failed to update adjustment
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/sso:
@@ -1123,10 +1351,9 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
@@ -1135,7 +1362,6 @@ paths:
             token.
           schema:
             type: string
-            format: uuid
         - name: lang
           in: query
           required: false
@@ -1153,25 +1379,27 @@ paths:
           required: false
           description: >-
             Set the redirect URL for the participant logging into the marketplace.
-            The value must be a base64 encoded path. For example, to redirect a participant to the privacy policy (/content/privacy_policy), the query string would be ?redirect=L2NvbnRlbnQvcHJpdmFjeV9wb2xpY3k=
-            example: e-gift wallet dashboard (/account/dashboard?tab=egift) ?redirect=L2FjY291bnQvZGFzaGJvYXJkP3RhYj1lZ2lmdA==
+            The value must be a base64 encoded path. For example, to redirect a
+            participant to the privacy policy (/content/privacy_policy), the query
+            string would be ?redirect=L2NvbnRlbnQvcHJpdmFjeV9wb2xpY3k=
           schema:
             type: string
-            format: url
       responses:
         '201':
-          description: success operation
+          description: SSO token generated
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantSSO'
+        '400':
+          description: Resource does not exist or participant not active.
         default:
           description: Unknown exception
     get:
       tags:
         - Participant > SSO
       summary: Validate a participant SSO token
-      description: Returns a participant object.
+      description: Returns a participant object if the SSO token is valid.
       operationId: validateSSOToken
       security:
         - Bearer: [ ]
@@ -1179,24 +1407,21 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of participant to return.
+          description: Unique ID of participant.
           schema:
             type: string
-            format: uuid
         - name: token
           in: query
           required: true
-          description: Token to validate.
+          description: SSO token to validate.
           schema:
             type: string
-            format: uuid
       responses:
         '200':
           description: successful operation
@@ -1204,12 +1429,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: Resource does not exist or no token match.
   /api/program/{programId}/participant/{uniqueId}/meta:
     put:
       tags:
         - Participant
       summary: Replace all participant metadata.
-      description: Replace all participant metadata.
+      description: >-
+        Completely replaces all existing participant metadata. Existing meta keys
+        not present in the request body will be deleted.
       operationId: putParticipantMeta
       security:
         - Bearer: [ ]
@@ -1217,26 +1446,29 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of participant.
           schema:
             type: string
-            format: uuid
       requestBody:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '200':
           description: successful operation
+        '400':
+          description: Invalid meta format or resource does not exist.
     patch:
       tags:
         - Participant
       summary: Add or Update one or more meta key pair values.
+      description: >-
+        Merges with existing metadata. Existing keys will be updated,
+        new keys will be added. Keys not present in the request are left unchanged.
       operationId: patchParticipantMeta
       security:
         - Bearer: [ ]
@@ -1244,26 +1476,26 @@ paths:
         - name: programId
           in: path
           required: true
-          description: The Program Unique Identifier.
+          description: The Program unique_id.
           schema:
             type: string
-            format: uuid
         - name: uniqueId
           in: path
           required: true
-          description: Unique ID of user to return.
+          description: Unique ID of participant.
           schema:
             type: string
-            format: uuid
       requestBody:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '200':
-          description: success operation
+          description: successful operation
+        '400':
+          description: Invalid meta format or resource does not exist.
   /api/program/{programId}/catalog:
     get:
       tags:
-        - catalog
+        - Program > Catalog
       summary: Catalog Search
       operationId: CatalogSearch
       description: Returns a paginated collection of products for the specified program.
@@ -1416,7 +1648,7 @@ paths:
   /api/program/{programId}/service-award:
     get:
       tags:
-        - service award
+        - Service Award
       summary: List service awards for a program
       operationId: getServiceAwardList
       security:
@@ -1479,7 +1711,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - service award
+        - Service Award
       summary: Create a new service award
       operationId: createServiceAward
       security:
@@ -1519,7 +1751,7 @@ paths:
   /api/program/{programId}/service-award/{serviceAwardId}:
     get:
       tags:
-        - service award
+        - Service Award
       summary: Retrieve a single service award
       operationId: getServiceAward
       security:
@@ -1557,7 +1789,7 @@ paths:
           description: Unknown exception
     put:
       tags:
-        - service award
+        - Service Award
       summary: Update a service award
       operationId: updateServiceAward
       security:
@@ -1615,7 +1847,7 @@ paths:
           description: Unknown exception
     delete:
       tags:
-        - service award
+        - Service Award
       summary: Delete a service award
       operationId: deleteServiceAward
       security:
@@ -1650,7 +1882,7 @@ paths:
   /api/program/{programId}/service-award/{serviceAwardId}/participant:
     get:
       tags:
-        - service award
+        - Service Award
       summary: List participants enrolled in a service award
       operationId: getServiceAwardParticipants
       security:
@@ -1715,7 +1947,7 @@ paths:
           description: Unknown exception
     post:
       tags:
-        - service award
+        - Service Award
       summary: Enroll participants in a service award
       operationId: bulkUpsertServiceAwardParticipants
       security:
@@ -1751,9 +1983,9 @@ paths:
               items:
                 $ref: '#/components/schemas/ServiceAwardParticipantWrite'
             example:
-              - Participant_id: "participant-unique-id-1"
+              - participant_id: "participant-unique-id-1"
                 date: "2020-03-15"
-              - Participant_id: "participant-unique-id-2"
+              - participant_id: "participant-unique-id-2"
                 date: "2021-06-01"
       responses:
         '201':
@@ -2172,9 +2404,9 @@ paths:
               items:
                 type: string
               example:
-                - Participant-unique-id-1
-                - Participant-unique-id-2
-                - Participant-unique-id-3
+                - participant-unique-id-1
+                - participant-unique-id-2
+                - participant-unique-id-3
         description: Array of participant unique IDs to create or update progress for.
         required: true
       responses:
@@ -2349,6 +2581,7 @@ paths:
           description: successful operation
         default:
           description: Unknown exception
+
 components:
   requestBodies:
     WebhookCreate:
@@ -2364,14 +2597,14 @@ components:
             type: array
             items:
               $ref: '#/components/schemas/Meta'
-      description: Meta
+      description: Array of key-value meta objects.
       required: true
     UserWrite:
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/UserWrite'
-      description: User object to add to the marketplace.
+      description: Participant object.
       required: true
   securitySchemes:
     BasicAuth:
@@ -2389,26 +2622,1680 @@ components:
   schemas:
     JwtRequest:
       type: object
+      description: >-
+        Token generation parameters. These are passed as query parameters, not in
+        the JSON body.
       properties:
         hoursUntilExpiry:
           type: integer
+          description: Number of hours until the token expires.
           minimum: 1
           maximum: 8760
+          default: 2
         tokenName:
           type: string
-          maximum: 255
+          description: Optional name for the token.
+          maxLength: 255
     JwtResponse:
       type: object
       properties:
         token:
           type: string
-        expiration:
+          description: The JWT token string (HS256 encoded).
+        expires:
           type: integer
+          description: Unix timestamp when the token expires.
     MessageResponse:
       type: object
       properties:
         message:
           type: string
+    UserList:
+      type: object
+      description: >-
+        Participant object as returned in list responses. Address, meta, and birthdate
+        are excluded from list views to reduce payload size. PII fields may be excluded
+        for users with limited access.
+      properties:
+        unique_id:
+          type: string
+          description: Participant unique identifier.
+          minLength: 2
+          maxLength: 45
+        email_address:
+          type: string
+          description: Participant email address.
+        credit:
+          type: number
+          description: Participant point balance.
+        firstname:
+          type: string
+          description: Participant first name.
+          maxLength: 50
+        lastname:
+          type: string
+          description: Participant last name.
+          maxLength: 50
+        phone:
+          type: string
+          description: Participant phone number.
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        status:
+          $ref: '#/components/schemas/UserStatusEnum'
+        language:
+          type: string
+          description: Language preference.
+          default: en
+        transactions_disabled:
+          type: integer
+          description: Whether transactions are disabled for this participant. 0 = enabled, 1 = disabled.
+          enum: [0, 1]
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+        deactivated_at:
+          type: string
+          nullable: true
+          description: Deactivation timestamp (Y-m-d H:i:s), null if active.
+        program:
+          type: string
+          description: The assigned program unique_id.
+        organization:
+          type: string
+          description: The assigned organization unique_id.
+    UserWrite:
+      type: object
+      description: Participant create/update request body.
+      properties:
+        email_address:
+          type: string
+          description: >-
+            Participant email address. Required on create. Must be a valid email format.
+            Must be unique per program when email login is enabled.
+        unique_id:
+          type: string
+          description: >-
+            Participant unique identifier. Optional on create (auto-generated UUID if omitted).
+            Cannot be changed on update. Alphanumeric with hyphens and underscores only.
+          minLength: 2
+          maxLength: 45
+          pattern: '^[a-zA-Z0-9_-]+$'
+        firstname:
+          type: string
+          description: Participant first name. No emojis allowed.
+          maxLength: 50
+        lastname:
+          type: string
+          description: Participant last name. No emojis allowed.
+          maxLength: 50
+        phone:
+          type: string
+          description: Participant phone number.
+        birthdate:
+          type: string
+          description: Participant birthdate in YYYY-MM-DD format.
+          pattern: '^\d{4}-\d{2}-\d{2}$'
+          example: '1990-01-15'
+        password:
+          type: string
+          description: Participant password. If provided, password_confirm must also be provided and match.
+        password_confirm:
+          type: string
+          description: Must match password if password is provided.
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+          default: 1
+        status:
+          $ref: '#/components/schemas/UserStatusEnum'
+        language:
+          type: string
+          description: Language preference.
+          default: en
+        address:
+          $ref: '#/components/schemas/Address'
+        meta:
+          type: array
+          description: Array of key-value metadata pairs. On PUT, replaces all existing meta.
+          items:
+            $ref: '#/components/schemas/Meta'
+    ParticipantRead:
+      type: object
+      description: >-
+        Full participant object returned on single-resource GET, create, and update responses.
+        Includes address and meta data. PII fields may be excluded for users with limited access.
+      properties:
+        unique_id:
+          type: string
+          description: Participant unique identifier.
+        email_address:
+          type: string
+          description: Participant email address.
+        credit:
+          type: number
+          description: Participant point balance.
+        firstname:
+          type: string
+          description: Participant first name.
+        lastname:
+          type: string
+          description: Participant last name.
+        phone:
+          type: string
+          description: Participant phone number.
+        birthdate:
+          type: string
+          description: Participant birthdate (YYYY-MM-DD).
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        status:
+          $ref: '#/components/schemas/UserStatusEnum'
+        language:
+          type: string
+          description: Language preference.
+        transactions_disabled:
+          type: integer
+          description: Whether transactions are disabled. 0 = enabled, 1 = disabled.
+          enum: [0, 1]
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+        deactivated_at:
+          type: string
+          nullable: true
+          description: Deactivation timestamp, null if active.
+        address:
+          $ref: '#/components/schemas/Address'
+        program:
+          type: string
+          description: The assigned program unique_id.
+        organization:
+          type: string
+          description: The assigned organization unique_id.
+        meta:
+          type: array
+          items:
+            $ref: '#/components/schemas/Meta'
+    ParticipantSSO:
+      type: object
+      properties:
+        token:
+          type: string
+          description: The SSO token.
+        redirect:
+          type: string
+          description: The redirect URL, present if redirect parameter was provided.
+    ProgramList:
+      type: object
+      description: Program object as returned in list responses.
+      properties:
+        unique_id:
+          type: string
+          description: Program unique identifier.
+          maxLength: 45
+        name:
+          type: string
+          description: The name of the program.
+          maxLength: 125
+        published:
+          type: integer
+          description: 1 is published, 0 is unpublished.
+          enum: [0, 1]
+        point:
+          type: number
+          description: The point-to-USD ratio. e.g. 1 means 1 point = $1 USD.
+          minimum: 1
+        url:
+          type: string
+          description: The full domain URL of the program (subdomain.domain).
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        is_avs:
+          type: integer
+          description: >-
+            When 1, transactions created with shipping addresses will have
+            their shipping addresses verified before creating the transaction.
+          enum: [0, 1]
+        enable_email_login:
+          type: integer
+          description: >-
+            1 = enabled, 0 = disabled. When enabled, participants can
+            login to the marketplace using their email address and password.
+          enum: [0, 1]
+          default: 0
+        grace_period:
+          type: integer
+          nullable: true
+          description: The number of days after end_date that the program remains active.
+        timezone:
+          type: string
+          description: >-
+            Program timezone. Options include: America/New_York, America/Chicago,
+            America/Denver, America/Phoenix, America/Los_Angeles, America/Anchorage,
+            America/Adak, Pacific/Honolulu.
+          default: America/Phoenix
+        start_date:
+          type: string
+          description: Program start date (YYYY-MM-DD).
+        end_date:
+          type: string
+          description: Program end date (YYYY-MM-DD HH:MM:SS).
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+        organization:
+          type: string
+          description: Organization unique_id.
+        status:
+          type: string
+          description: Program status derived from active field.
+        meta:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Meta'
+    ProgramRead:
+      type: object
+      description: Full program object returned on single-resource GET, create, and update responses.
+      properties:
+        unique_id:
+          type: string
+          description: Program unique identifier.
+          maxLength: 45
+        name:
+          type: string
+          description: The name of the program.
+          maxLength: 125
+        published:
+          type: integer
+          description: 1 is published, 0 is unpublished.
+          enum: [0, 1]
+        collect_ssn:
+          type: integer
+          description: 1 is on, 0 is off.
+          enum: [0, 1]
+        is_avs:
+          type: integer
+          description: >-
+            When 1, transactions created with shipping addresses will have
+            their shipping addresses verified before creating the transaction.
+            When 0, address verification does not occur on the transaction shipping address.
+            Regardless of this setting, AVS is always enabled in the marketplace UI.
+          enum: [0, 1]
+        point:
+          type: number
+          description: The point-to-USD ratio. e.g. 1 means 1 point = $1 USD.
+          minimum: 1
+        url:
+          type: string
+          description: The full domain URL of the program (subdomain.domain).
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        enable_email_login:
+          type: integer
+          description: >-
+            1 = enabled, 0 = disabled. When enabled, participants can
+            login to the marketplace using their email address and password.
+          enum: [0, 1]
+          default: 0
+        grace_period:
+          type: integer
+          nullable: true
+          description: The number of days after end_date that the program remains active.
+        timezone:
+          type: string
+          description: >-
+            Program timezone. Options include: America/New_York, America/Chicago,
+            America/Denver, America/Phoenix, America/Los_Angeles, America/Anchorage,
+            America/Adak, Pacific/Honolulu.
+          default: America/Phoenix
+        start_date:
+          type: string
+          description: Program start date (YYYY-MM-DD).
+        end_date:
+          type: string
+          description: Program end date (YYYY-MM-DD HH:MM:SS).
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+        organization:
+          type: object
+          description: The parent organization.
+          properties:
+            unique_id:
+              type: string
+            name:
+              type: string
+            id:
+              type: integer
+        meta:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/Meta'
+        cost_center_id:
+          type: string
+          description: Cost center identifier.
+          maxLength: 45
+        accounting_id:
+          type: string
+          nullable: true
+          description: Accounting identifier. Only superadmin/accounting roles can set this.
+          maxLength: 45
+        deposit_amount:
+          type: integer
+          description: Deposit amount.
+          default: 0
+        low_level_deposit:
+          type: integer
+          description: Low level deposit threshold.
+          default: 0
+        issue_1099:
+          type: integer
+          description: 1 is true, 0 is false.
+          enum: [0, 1]
+        employee_payroll_file:
+          type: integer
+          description: 1 is true, 0 is false.
+          enum: [0, 1]
+        contact:
+          $ref: '#/components/schemas/Contact'
+        accounting_contact:
+          $ref: '#/components/schemas/Contact'
+        productCriteria:
+          $ref: '#/components/schemas/ProductCriteria'
+        featured_products:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductSku'
+        auto_redemption:
+          $ref: '#/components/schemas/AutoRedemption'
+        one_time_auto_redemptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OneTimeAutoRedemption'
+        programTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProgramType'
+        actions:
+          $ref: '#/components/schemas/Actions'
+    ProgramCreate:
+      type: object
+      required:
+        - unique_id
+        - name
+        - point
+        - Organization
+      properties:
+        unique_id:
+          type: string
+          description: >-
+            Program unique identifier. Alphanumeric with hyphens and underscores only.
+            No whitespace allowed.
+          minLength: 1
+          maxLength: 45
+          pattern: '^[a-zA-Z0-9_-]+$'
+        name:
+          type: string
+          description: The name of the program.
+          minLength: 1
+          maxLength: 125
+        point:
+          type: number
+          description: The point-to-USD ratio. e.g. 1 means 1 point = $1 USD.
+          minimum: 1
+        organization:
+          type: string
+          description: Organization unique_id to assign this program to.
+        url:
+          type: string
+          description: Full domain URL (subdomain.domain format).
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+          default: 1
+        published:
+          type: integer
+          description: 1 is published, 0 is unpublished.
+          enum: [0, 1]
+        start_date:
+          type: string
+          description: Program start date (YYYY-MM-DD).
+        end_date:
+          type: string
+          description: Program end date (YYYY-MM-DD HH:MM:SS).
+        grace_period:
+          type: integer
+          description: The number of days after end_date that the program remains active.
+        enable_email_login:
+          type: integer
+          description: >-
+            0 = Disabled, 1 = enabled. When enabled, participants can
+            login to the marketplace using their email address and password.
+          enum: [0, 1]
+          default: 0
+        timezone:
+          type: string
+          description: >-
+            Program timezone. Must be a valid timezone ID. Options include:
+            America/New_York, America/Chicago, America/Denver, America/Phoenix,
+            America/Los_Angeles, America/Anchorage, America/Adak, Pacific/Honolulu.
+          default: America/Phoenix
+        collect_ssn:
+          type: integer
+          description: 1 to collect SSN, 0 to not.
+          enum: [0, 1]
+        is_avs:
+          type: integer
+          description: 1 to enable address verification on transactions, 0 to disable.
+          enum: [0, 1]
+          default: 0
+        deposit_amount:
+          type: number
+          description: Deposit amount.
+        low_level_deposit:
+          type: number
+          description: Low level deposit threshold.
+        issue_1099:
+          type: integer
+          description: 1 is true, 0 is false.
+          enum: [0, 1]
+        employee_payroll_file:
+          type: integer
+          description: 1 is true, 0 is false.
+          enum: [0, 1]
+        cost_center_id:
+          type: string
+          description: Cost center identifier.
+          maxLength: 45
+        accounting_id:
+          type: string
+          nullable: true
+          description: Accounting identifier. Only superadmin/accounting roles can set this.
+          maxLength: 45
+        contact:
+          $ref: '#/components/schemas/ContactWrite'
+        accounting_contact:
+          $ref: '#/components/schemas/ContactWrite'
+        auto_redemption:
+          type: object
+          description: Auto-redemption settings. product_sku is required if this object is provided.
+          properties:
+            product_sku:
+              type: string
+              description: SKU of the product for auto-redemption.
+            active:
+              type: integer
+              enum: [0, 1]
+            all_participant:
+              type: integer
+              enum: [0, 1]
+        one_time_auto_redemptions:
+          type: array
+          items:
+            type: object
+            properties:
+              sku:
+                type: string
+              active:
+                type: integer
+                enum: [0, 1]
+              participant_count:
+                type: integer
+        programTypes:
+          type: array
+          description: Array of program type IDs.
+          items:
+            type: integer
+    ProgramUpdate:
+      type: object
+      description: >-
+        Program update request body. Only include fields you wish to change.
+        unique_id cannot be changed. Setting active=0 also sets published=0.
+      properties:
+        name:
+          type: string
+          description: The name of the program.
+          minLength: 1
+          maxLength: 125
+        point:
+          type: number
+          description: The point-to-USD ratio.
+          minimum: 1
+        url:
+          type: string
+          description: Full domain URL (subdomain.domain format).
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive. Setting to 0 also sets published to 0.
+          enum: [0, 1]
+        published:
+          type: integer
+          description: 1 is published, 0 is unpublished.
+          enum: [0, 1]
+        start_date:
+          type: string
+          description: Program start date (YYYY-MM-DD).
+        end_date:
+          type: string
+          description: Program end date (YYYY-MM-DD HH:MM:SS).
+        grace_period:
+          type: integer
+          description: Days after end_date that the program remains active.
+        enable_email_login:
+          type: integer
+          description: 0 = Disabled, 1 = enabled.
+          enum: [0, 1]
+        timezone:
+          type: string
+          description: Program timezone. Must be a valid timezone ID.
+        collect_ssn:
+          type: integer
+          enum: [0, 1]
+        is_avs:
+          type: integer
+          enum: [0, 1]
+        deposit_amount:
+          type: number
+        low_level_deposit:
+          type: number
+        issue_1099:
+          type: integer
+          enum: [0, 1]
+        employee_payroll_file:
+          type: integer
+          enum: [0, 1]
+        cost_center_id:
+          type: string
+          maxLength: 45
+        accounting_id:
+          type: string
+          nullable: true
+          description: Only superadmin/accounting roles can modify this.
+          maxLength: 45
+        contact:
+          $ref: '#/components/schemas/ContactWrite'
+        accounting_contact:
+          $ref: '#/components/schemas/ContactWrite'
+        auto_redemption:
+          type: object
+          properties:
+            product_sku:
+              type: string
+            active:
+              type: integer
+              enum: [0, 1]
+            all_participant:
+              type: integer
+              enum: [0, 1]
+        one_time_auto_redemptions:
+          type: array
+          items:
+            type: object
+            properties:
+              sku:
+                type: string
+              active:
+                type: integer
+                enum: [0, 1]
+              participant_count:
+                type: integer
+        programTypes:
+          type: array
+          items:
+            type: integer
+    ProgramMetrics:
+      description: Basic program metrics.
+      type: object
+      properties:
+        participant_total:
+          description: Total number of active participants.
+          type: integer
+        transaction_total:
+          description: Total number of transactions.
+          type: integer
+        adjustment_total:
+          description: Total number of point adjustments.
+          type: integer
+    OrganizationList:
+      type: object
+      description: Organization object as returned in list responses.
+      properties:
+        unique_id:
+          type: string
+          description: The unique identifier of the organization.
+          minLength: 2
+          maxLength: 45
+          pattern: '^[a-zA-Z0-9_-]+$'
+        name:
+          type: string
+          description: The name of the organization.
+          minLength: 2
+          maxLength: 50
+        industry_program:
+          $ref: '#/components/schemas/IndustryProgramEnum'
+        program_count:
+          description: The number of programs configured under this organization.
+          type: integer
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        parent:
+          type: string
+          nullable: true
+          description: Parent organization unique_id.
+        domains:
+          type: array
+          description: Domain URLs associated with this organization.
+          items:
+            type: string
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+    OrganizationRead:
+      type: object
+      description: Full organization object.
+      properties:
+        unique_id:
+          type: string
+          description: The unique identifier of the organization.
+          minLength: 2
+          maxLength: 45
+        parent:
+          type: string
+          nullable: true
+          description: The parent organization unique_id.
+        name:
+          type: string
+          description: The name of the organization.
+          minLength: 2
+          maxLength: 50
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+        domains:
+          type: array
+          description: >-
+            Domain URLs associated with this organization. Each domain must match
+            the pattern for a valid domain URL and be unique across all organizations.
+          items:
+            type: string
+        industry_program:
+          $ref: '#/components/schemas/IndustryProgramEnum'
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        program_count:
+          type: integer
+          description: The number of programs configured under this organization.
+        company_contact:
+          $ref: '#/components/schemas/Contact'
+        accounts_payable_contact:
+          $ref: '#/components/schemas/Contact'
+    OrganizationCreate:
+      type: object
+      required:
+        - unique_id
+        - name
+        - parent
+      properties:
+        unique_id:
+          type: string
+          description: >-
+            The unique identifier for the organization. Alphanumeric with hyphens
+            and underscores only.
+          minLength: 2
+          maxLength: 45
+          pattern: '^[a-zA-Z0-9_-]+$'
+        parent:
+          type: string
+          description: >-
+            The parent organization unique_id. Required. Must reference an existing
+            organization. Cannot create circular references.
+        name:
+          type: string
+          description: The name of the organization.
+          minLength: 2
+          maxLength: 50
+        domains:
+          type: array
+          description: >-
+            Domain URLs to associate with this organization. Each must be a valid
+            domain URL and unique across all organizations. Converted to lowercase.
+          items:
+            type: string
+        industry_program:
+          $ref: '#/components/schemas/IndustryProgramEnum'
+        company_contact:
+          $ref: '#/components/schemas/ContactWrite'
+        accounts_payable_contact:
+          $ref: '#/components/schemas/ContactWrite'
+    OrganizationUpdate:
+      type: object
+      description: >-
+        Organization update request body. Only include fields you wish to change.
+        unique_id and parent cannot be changed on update (they will be silently ignored).
+      properties:
+        name:
+          type: string
+          description: The name of the organization.
+          minLength: 1
+          maxLength: 50
+        domains:
+          type: array
+          description: >-
+            Replaces all existing domains. Each must be a valid domain URL and
+            unique across all organizations.
+          items:
+            type: string
+        industry_program:
+          description: >-
+            Industry program type. Can only be set once; cannot be unset after initial assignment.
+          $ref: '#/components/schemas/IndustryProgramEnum'
+        company_contact:
+          $ref: '#/components/schemas/ContactWrite'
+        accounts_payable_contact:
+          $ref: '#/components/schemas/ContactWrite'
+    WebhookCreate:
+      type: object
+      required:
+        - title
+        - url
+        - event
+      properties:
+        title:
+          type: string
+          description: Webhook title.
+          minLength: 1
+          maxLength: 255
+        url:
+          type: string
+          description: >-
+            URL the webhook POSTs data to. Must start with https:// and be between
+            11 and 255 characters. Cannot point to private/reserved IP addresses.
+          minLength: 11
+          maxLength: 255
+        event:
+          type: string
+          description: Which event triggers this webhook (e.g. Transaction.create).
+          minLength: 1
+          maxLength: 255
+        auth_type:
+          type: string
+          nullable: true
+          description: Authentication type for the webhook endpoint.
+          enum:
+            - Bearer
+            - Basic
+        username:
+          type: string
+          nullable: true
+          description: Username for basic authentication.
+        password:
+          type: string
+          nullable: true
+          description: Password for basic authentication.
+        active:
+          type: integer
+          description: Is this webhook active? 0 = false, 1 = true.
+          enum: [0, 1]
+        immutable:
+          type: integer
+          description: Can this webhook be modified? 0 = mutable, 1 = immutable.
+          enum: [0, 1]
+    WebhookRead:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: The unique identifier of the webhook.
+        title:
+          type: string
+          description: Webhook title.
+        url:
+          type: string
+          description: URL the webhook POSTs data to.
+        event:
+          type: string
+          description: Which event triggers this webhook.
+        auth_type:
+          type: string
+          nullable: true
+          description: Authentication type (Bearer or Basic).
+        active:
+          type: integer
+          description: Is this webhook active? 0 = false, 1 = true.
+          enum: [0, 1]
+        immutable:
+          type: integer
+          description: Can this webhook be modified? 0 = mutable, 1 = immutable.
+          enum: [0, 1]
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+    WebhookLogs:
+      type: object
+      properties:
+        webhookLogs:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookLog'
+    WebhookLog:
+      type: object
+      properties:
+        _id:
+          type: object
+          properties:
+            $oid:
+              type: string
+              description: MongoDB ObjectId.
+        request_time:
+          type: object
+        http_status:
+          type: integer
+          description: >-
+            Most recent HTTP status response from the webhook's last attempt.
+        responses:
+          type: array
+          items:
+            $ref: '#/components/schemas/httpResponse'
+        request:
+          $ref: '#/components/schemas/httpRequest'
+    WebhookReplayResponse:
+      type: object
+      properties:
+        http_status_code:
+          description: >-
+            The HTTP response status code from the server the webhook was replayed to,
+            or the string "Failed" if the connection failed.
+          oneOf:
+            - type: integer
+            - type: string
+              enum: ["Failed"]
+    httpRequest:
+      type: object
+      properties:
+        headers:
+          type: object
+          description: Request headers (Authorization header is stripped).
+        body:
+          type: string
+    httpResponse:
+      allOf:
+        - $ref: '#/components/schemas/httpRequest'
+        - type: object
+          properties:
+            http_status:
+              type: integer
+    CreateTransaction:
+      type: object
+      required:
+        - products
+      properties:
+        products:
+          type: array
+          description: Array of products for the transaction. At least one product is required.
+          items:
+            $ref: '#/components/schemas/ProductForTransaction'
+        issue_points:
+          type: boolean
+          description: >-
+            When true, credits the participant with enough points to cover the
+            transaction cost before processing. Defaults to false.
+          default: false
+        shipping:
+          $ref: '#/components/schemas/Address'
+        email_address:
+          type: string
+          description: >-
+            Email address for the transaction. Must be a valid email.
+            Required for digital products if participant has no email on file.
+        phone:
+          type: string
+          description: Phone number for the transaction. Must be a valid phone number if provided.
+        unique_id:
+          type: string
+          description: Optional transaction unique identifier.
+        transaction_source:
+          type: string
+          description: >-
+            Transaction source identifier. Reserved values (AUTO_REDEMPTION,
+            MARKETPLACE, CUSTOMER_SERVICE, GAMES, KIA_KASH, REDEMPTION_CAMPAIGNS,
+            SWEEPSTAKE) cannot be used unless the caller is a superadmin.
+        avs_disabled:
+          type: boolean
+          description: >-
+            When true, disables Address Verification Service for this transaction
+            even if the program has AVS enabled. Defaults to false.
+          default: false
+        meta:
+          type: array
+          items:
+            $ref: '#/components/schemas/Meta'
+    Transaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        unique_id:
+          type: string
+        participant_id:
+          type: integer
+        wholesale:
+          type: number
+          format: float
+        subtotal:
+          type: number
+          format: float
+        total:
+          type: number
+          format: float
+        points:
+          type: number
+          format: float
+          description: Total points cost (total * program point ratio).
+        email_address:
+          type: string
+        phone:
+          type: string
+        type:
+          type: integer
+          description: Transaction type.
+        status:
+          type: string
+          description: Transaction status.
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        shipping:
+          $ref: '#/components/schemas/TransactionAddressRead'
+        meta:
+          type: array
+          items:
+            $ref: '#/components/schemas/Meta'
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionProductRead'
+        user:
+          $ref: '#/components/schemas/ParticipantRead'
+    TransactionProductRead:
+      type: object
+      properties:
+        name:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+        total:
+          type: number
+          format: float
+        points:
+          type: number
+          format: float
+        guid:
+          type: string
+          description: Unique GUID for this transaction item.
+        reissue_date:
+          type: string
+          description: Reissue date (YYYY-MM-DD).
+        returned:
+          type: integer
+          description: 1 if item has been returned, 0 if not.
+          enum: [0, 1]
+        var_amount:
+          type: number
+          format: float
+          description: Variable amount for ranged-price products.
+        program_fee:
+          type: number
+          format: float
+        terms_approved:
+          type: string
+        is_digital:
+          type: integer
+          description: 1 for digital, 0 for physical.
+          enum: [0, 1]
+        is_wallet_enabled:
+          type: integer
+          description: 1 if wallet enabled, 0 if not.
+          enum: [0, 1]
+    ProductForTransaction:
+      type: object
+      required:
+        - sku
+        - quantity
+      properties:
+        sku:
+          type: string
+          description: Product SKU (converted to uppercase).
+        quantity:
+          type: integer
+          description: Quantity to order. Must be greater than 0.
+          minimum: 1
+        amount:
+          type: number
+          description: >-
+            Required for ranged-price products. The dollar amount to apply.
+            Must be within the product's min/max price range.
+    ParticipantIdArray:
+      type: object
+      required:
+        - participant_id
+      properties:
+        participant_id:
+          type: array
+          description: Array of participant unique IDs to fetch.
+          items:
+            type: string
+          example:
+            - UNIQUE_ID1
+            - UNIQUE_ID2
+            - UNIQUE_ID3
+    Meta:
+      type: object
+      description: A single key-value metadata pair. The key is the property name and the value is its value.
+      additionalProperties:
+        type: string
+      example:
+        department: "Engineering"
+    ProductSku:
+      type: string
+    Address:
+      type: object
+      properties:
+        firstname:
+          type: string
+          description: Recipient first name. Required for physical product shipments.
+        lastname:
+          type: string
+          description: Recipient last name.
+        address1:
+          type: string
+          description: Street address line 1.
+        address2:
+          type: string
+          description: Street address line 2.
+        city:
+          type: string
+          description: City.
+        state:
+          type: string
+          description: State abbreviation (e.g. NY). Required for US shipments with physical items.
+        zip:
+          type: string
+          description: Postal/ZIP code.
+        country_code:
+          type: string
+          description: Two-letter country code (e.g. US, CA).
+          maxLength: 2
+          default: US
+    TransactionAddressRead:
+      type: object
+      properties:
+        firstname:
+          type: string
+        lastname:
+          type: string
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        zip:
+          type: string
+        country:
+          type: string
+          description: Country name or code.
+        country_code:
+          type: string
+          description: Two-letter country code.
+    PointRead:
+      type: object
+      properties:
+        id:
+          type: integer
+        amount:
+          type: number
+          description: >-
+            Point amount (displayed as amount * program point ratio).
+        type:
+          type: string
+          description: '"credit" to add points, "debit" to subtract points.'
+          enum:
+            - credit
+            - debit
+        reference:
+          type: string
+          description: Reference identifier for client internal use.
+        description:
+          type: string
+          description: Description visible to the participant.
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type: string
+          description: Last update timestamp (Y-m-d H:i:s).
+        transaction_id:
+          type: integer
+          nullable: true
+          description: Associated transaction ID, null for manual adjustments.
+        transaction_item_id:
+          type: integer
+          nullable: true
+        completed_at:
+          type: string
+          nullable: true
+          description: Date the activity was completed (YYYY-MM-DD).
+        activity:
+          type: string
+          nullable: true
+          description: Activity label for the adjustment.
+        status:
+          type: string
+          description: Adjustment status.
+    PointReadWithUser:
+      allOf:
+        - $ref: '#/components/schemas/PointRead'
+        - type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/ParticipantRead'
+    PointWrite:
+      type: object
+      required:
+        - amount
+        - type
+      properties:
+        amount:
+          type: number
+          description: >-
+            Point amount. Must be positive and non-empty. Credit adjustments
+            cannot cause the total to exceed 99999999.99.
+          minimum: 0
+          exclusiveMinimum: true
+        type:
+          type: string
+          description: '"credit" to add points, "debit" to subtract points.'
+          enum:
+            - credit
+            - debit
+        reference:
+          type: string
+          description: Reference identifier for client use.
+        completed_at:
+          type: string
+          description: >-
+            YYYY-MM-DD. Optional reference to the date a participant completed
+            the activity to receive the points. This can be used if the date
+            the points are credited via the API is after the date the
+            participant earned the points.
+        description:
+          type: string
+          description: Description visible to participant.
+        activity:
+          type: string
+          description: Activity label for the adjustment.
+    PointUpdate:
+      type: object
+      description: >-
+        Update adjustment metadata. Amount and type cannot be changed after creation.
+      properties:
+        reference:
+          type: string
+          description: Reference identifier for client use.
+        completed_at:
+          type: string
+          description: >-
+            YYYY-MM-DD. Optional reference to the date a participant completed
+            the activity to receive the points.
+        description:
+          type: string
+          description: Description visible to participant.
+        activity:
+          type: string
+          description: Activity label for the adjustment.
+    ReturnRead:
+      type: object
+      properties:
+        id:
+          type: integer
+        guid:
+          type: string
+          description: Return GUID.
+        notes:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        user:
+          $ref: '#/components/schemas/ReturnUserRead'
+        item:
+          $ref: '#/components/schemas/ReturnItemRead'
+        participant:
+          $ref: '#/components/schemas/ParticipantRead'
+    ReturnUserRead:
+      type: object
+      description: The admin user who processed the return.
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+        firstname:
+          type: string
+        lastname:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    ReturnItemRead:
+      type: object
+      properties:
+        transaction_id:
+          type: integer
+          description: The transaction ID of the item returned.
+        sku:
+          type: string
+        guid:
+          type: string
+          description: The GUID of the transaction item.
+        quantity:
+          type: integer
+          description: The quantity of item returned.
+    UserStatusEnum:
+      type: string
+      description: >-
+        Acceptable participant statuses: ACTIVE, HOLD (still active),
+        INACTIVE, CANCELLED (sets inactive and zeros out points),
+        DATADEL (sets inactive and deletes user PII - can only be set via DELETE endpoint).
+      enum:
+        - ACTIVE
+        - HOLD
+        - INACTIVE
+        - CANCELLED
+        - SUSPENDED
+    IndustryProgramEnum:
+      type: integer
+      description: >-
+        Industry program types: 1 = Health_Wellness, 2 = Channel_Sales,
+        3 = Employee_Recognition, 4 = Consumer, 5 = Market_Research,
+        6 = Loyalty_Marketing, 7 = Rebates.
+      enum: [1, 2, 3, 4, 5, 6, 7]
+    LanguageEnum:
+      type: string
+      enum:
+        - en_US
+        - es_US
+      description: 'Language options: en_US = English, es_US = Spanish.'
+    CountryEnum:
+      type: string
+      description: Supported country codes.
+      enum:
+        - US
+        - CA
+        - MX
+        - ES
+        - DE
+        - IN
+        - JP
+        - KR
+        - IT
+        - MY
+        - NL
+        - BR
+        - RU
+        - CN
+    Contact:
+      type: object
+      description: Contact information (read response).
+      properties:
+        firstname:
+          type: string
+        lastname:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        address1:
+          type: string
+        address2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+          description: State abbreviation (e.g. NY).
+        zip:
+          type: string
+    ContactWrite:
+      type: object
+      description: Contact information for create/update requests.
+      properties:
+        firstname:
+          type: string
+          description: Contact first name.
+          minLength: 1
+          maxLength: 50
+        lastname:
+          type: string
+          description: Contact last name.
+          minLength: 1
+          maxLength: 50
+        phone:
+          type: string
+          description: Contact phone number.
+          minLength: 10
+          maxLength: 255
+        email:
+          type: string
+          description: Contact email address. Must be a valid email format.
+        address1:
+          type: string
+          description: Street address line 1.
+          minLength: 1
+          maxLength: 255
+        address2:
+          type: string
+          description: Street address line 2.
+          maxLength: 50
+        city:
+          type: string
+          description: City.
+          minLength: 1
+          maxLength: 155
+        state:
+          type: string
+          description: State abbreviation (e.g. NY).
+          minLength: 1
+          maxLength: 3
+        zip:
+          type: string
+          description: Postal/ZIP code. Must be a valid US postal code format.
+    AutoRedemption:
+      type: object
+      properties:
+        product_sku:
+          type: string
+        interval:
+          type: integer
+        schedule:
+          type: string
+        all_participant:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        id:
+          type: integer
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        active:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        program_id:
+          type: integer
+    OneTimeAutoRedemption:
+      type: object
+      properties:
+        product_sku:
+          type: string
+        interval:
+          type: integer
+        all_participant:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        id:
+          type: integer
+        redemption_date:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        active:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        program_id:
+          type: string
+    ProgramType:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        is_active:
+          type: boolean
+    Actions:
+      type: object
+      properties:
+        autoRedemption:
+          type: boolean
+        product:
+          type: boolean
+        vendor:
+          type: boolean
+        layout:
+          type: boolean
+        sweepstake:
+          type: boolean
+        content:
+          type: boolean
+        offlineRedemption:
+          type: boolean
+        fileUpload:
+          type: boolean
+        redemptionCampaigns:
+          type: boolean
+        programParticipantConfig:
+          type: boolean
+    Price:
+      type: object
+      properties:
+        min:
+          type: integer
+        max:
+          type: integer
+    Brand:
+      type: object
+      properties:
+        unique_id:
+          type: string
+        name:
+          type: string
+        active:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+    Category:
+      type: object
+      properties:
+        name:
+          type: string
+        unique_id:
+          type: string
+        id:
+          type: integer
+    Product:
+      type: object
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        terms:
+          type: string
+        active:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        vendor:
+          type: string
+        vendor_product_id:
+          type: string
+        digital:
+          type: integer
+          description: 1 for digital, 0 for physical.
+          enum: [0, 1]
+        category:
+          $ref: '#/components/schemas/Category'
+        brand:
+          $ref: '#/components/schemas/Category'
+        group:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+        price_ranged:
+          type: integer
+          description: 1 for ranged price, 0 for fixed price.
+          enum: [0, 1]
+        price_ranged_min:
+          type: number
+          format: float
+        price_ranged_max:
+          type: number
+          format: float
+        price_wholesale:
+          type: number
+          format: float
+        price_retail:
+          type: number
+          format: float
+        price_shipping:
+          type: number
+          format: float
+        price_handling:
+          type: number
+          format: float
+        price_total:
+          type: number
+          format: float
+        source:
+          type: string
+        manage_inventory:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        inventory_count:
+          type: integer
+        tax_exempt:
+          type: integer
+          description: 1 for true, 0 for false.
+          enum: [0, 1]
+        meta:
+          type: array
+          items:
+            $ref: '#/components/schemas/Meta'
+    ProductCriteria:
+      type: object
+      properties:
+        price:
+          $ref: '#/components/schemas/Price'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        brands:
+          type: array
+          items:
+            $ref: '#/components/schemas/Brand'
+        groups:
+          type: array
+          items:
+            type: string
+        exclude_products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        exclude_brands:
+          type: array
+          items:
+            $ref: '#/components/schemas/Brand'
+        exclude_vendors:
+          type: array
+          items:
+            type: string
+        featured_page_title:
+          type: string
+    ShippingData:
+      type: object
+      description: Shipping tracking information for a transaction item.
+      properties:
+        guid:
+          type: string
+          description: The unique identifier for the transaction item.
+        tracking_number:
+          type: string
+          description: The shipment tracking number.
+        carrier:
+          type: string
+          description: The shipping carrier (e.g., UPS, FedEx, USPS).
+        status:
+          type: object
+          description: The current shipping status.
+          properties:
+            status:
+              type: string
+              description: The delivery status of the shipment.
+              enum:
+                - processing
+                - shipped
+                - delivered
+            status_date:
+              type: string
+              description: The date and time when the status was set (Y-m-d H:i:s).
     CatalogProduct:
       type: object
       properties:
@@ -2496,1302 +4383,6 @@ components:
           type: integer
         tax_exempt:
           type: boolean
-    UserList:
-      type: object
-      properties:
-        email_address:
-          type: string
-        unique_id:
-          type: string
-          format: uuid
-        credit:
-          type: string
-        firstname:
-          type: string
-        lastname:
-          type: string
-        phone:
-          type: string
-        active:
-          type: integer
-          format: int32
-          description: User Status
-        status:
-          $ref: '#/components/schemas/UserStatusEnum'
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        deactivated_at:
-          type: string
-        program:
-          description: the assigend program
-          type: string
-          format: uuid
-        organization:
-          description: the assigend organization
-          type: string
-          format: uuid
-    UserWrite:
-      type: object
-      properties:
-        email_address:
-          type: string
-        unique_id:
-          type: string
-          format: uuid
-        firstname:
-          type: string
-        lastname:
-          type: string
-        phone:
-          type: string
-        birthdate:
-          type: string
-          description: m/d/Y
-        password:
-          type: string
-        active:
-          type: integer
-          format: int32
-          description: User Status
-        status:
-          $ref: '#/components/schemas/UserStatusEnum'
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        address:
-          $ref: '#/components/schemas/Address'
-        program:
-          description: the assigend program
-          type: string
-          format: uuid
-        organization:
-          description: the assigend organization
-          type: string
-          format: uuid
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-    ParticipantRead:
-      type: object
-      properties:
-        email_address:
-          type: string
-        unique_id:
-          type: string
-          format: uuid
-        credit:
-          type: string
-        firstname:
-          type: string
-        lastname:
-          type: string
-        phone:
-          type: string
-        birthdate:
-          type: string
-          description: YYYY-MM-DD
-        active:
-          type: integer
-          format: int32
-          description: User Status
-        status:
-          $ref: '#/components/schemas/UserStatusEnum'
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        deactivated_at:
-          type: string
-        address:
-          $ref: '#/components/schemas/Address'
-        program:
-          description: the assigend program
-          type: string
-          format: uuid
-        organization:
-          description: the assigend organization
-          type: string
-          format: uuid
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-    ParticipantSSO:
-      type: object
-      properties:
-        token:
-          type: string
-        domain:
-          type: string
-        exchange:
-          type: string
-    ProgramList:
-      type: object
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-        name:
-          type: string
-          description: the name of the program
-        published:
-          type: integer
-          description: 1 is published, 0 is unpublished
-        collect_ssn:
-          type: integer
-          description: 1 is on, 0 is off
-        point:
-          type: integer
-          description: the value here is the ratio for 1USD
-        phone:
-          type: string
-        url:
-          type: string
-          description: the subdomain of the program URL
-        domain_id:
-          type: integer
-          format: int32
-          description: the top level domain of the program URL
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        start_date:
-          type: string
-          format: date
-          description: YYYY-MM-DD
-        end_date:
-          type: string
-          description: YYYY-MM-DD H:i:s
-        grace_period:
-          type: integer
-          description: The amount of days after end date, that the program is still active
-        timezone:
-          type: string
-          description: >-
-            Options: America/New_York, America/Chicago, America/Denver,
-            America/Phoenix, America/Los_Angeles, America/Anchorage,
-            America/Adak, Pacific/Honolulu
-        organization:
-          type: string
-          format: uuid
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-        contact_reference:
-          type: string
-        accounting_contact_reference:
-          type: string
-        cost_center_id:
-          type: string
-        invoice_to:
-          type: string
-        deposit_amount:
-          type: integer
-        low_level_deposit:
-          type: integer
-        issue_1099:
-          type: integer
-          description: 1 is true 0 is false
-        enable_email_login:
-          type: integer
-          default: 0
-          description: >-
-            1 is true 0 is false.  When enabled, this permits participants to
-            login to the marketplace using their email address and password.
-        employee_payroll_file:
-          type: integer
-          description: 1 is true 0 is false
-        active:
-          type: integer
-          description: 1 is true 0 is false
-        is_avs:
-          type: integer
-          description: >-
-            When 1 then transactions created with shipping addresses will have
-            thier shipping addresses verified before creating the transaction.
-            Regardless of this setting, AVS is always enabled in marketplaces
-            before causing a transaction.
-    ProgramRead:
-      type: object
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-        name:
-          type: string
-          description: the name of the program
-        published:
-          type: integer
-          description: 1 is published, 0 is unpublished
-        collect_ssn:
-          type: integer
-          description: 1 is on, 0 is off
-        is_avs:
-          type: integer
-          description: >-
-            When 1 then transactions created with shipping addresses will have
-            thier shipping addresses verified before creating the transaction.
-            When 0, address verification does not occur on the shipping address
-            on the transaction model. Regardless of this setting, AVS is always
-            enabled in marketplaces before causing a transaction.
-        point:
-          type: integer
-          description: the value here is the ratio for 1USD
-        phone:
-          type: string
-        url:
-          type: string
-          description: the subdomain of the program URL
-        domain_id:
-          type: integer
-          format: int32
-          description: the top level domain of the program URL
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        start_date:
-          type: string
-          format: date
-          description: YYYY-MM-DD
-        end_date:
-          type: string
-          description: YYYY-MM-DD H:i:s
-        grace_period:
-          type: integer
-          description: The amount of days after end date, that the program is still active
-        timezone:
-          type: string
-          description: >-
-            Options: America/New_York, America/Chicago, America/Denver,
-            America/Phoenix, America/Los_Angeles, America/Anchorage,
-            America/Adak, Pacific/Honolulu
-        organization:
-          type: string
-          format: uuid
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-        cost_center_id:
-          type: string
-        invoice_to:
-          type: string
-        deposit_amount:
-          type: integer
-        low_level_deposit:
-          type: integer
-        issue_1099:
-          type: integer
-          description: 1 is true 0 is false
-        enable_email_login:
-          type: integer
-          default: 0
-          description: >-
-            1 is true 0 is false.  When enabled, this permits participants to
-            login to the marketplace using their email address and password.
-        employee_payroll_file:
-          type: integer
-          description: 1 is true 0 is false
-        active:
-          type: integer
-          description: 1 is true 0 is false
-        contact:
-          $ref: '#/components/schemas/Contact'
-        accounting_contact:
-          $ref: '#/components/schemas/AccountingContact'
-        productCriteria:
-          $ref: '#/components/schemas/ProductCriteria'
-        featured_products:
-          type: array
-          items:
-            $ref: '#/components/schemas/ProductSku'
-        auto_redemption:
-          $ref: '#/components/schemas/AutoRedemption'
-        one_time_auto_redemption:
-          type: array
-          items:
-            $ref: '#/components/schemas/OneTimeAutoRedemption'
-        program_types:
-          type: array
-          items:
-            $ref: '#/components/schemas/ProgramType'
-        actions:
-          $ref: '#/components/schemas/Actions'
-    ProgramCreate:
-      type: object
-      required:
-        - unique_id
-        - name
-        - point
-        - organization
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-        name:
-          type: string
-          description: the name of the program
-        point:
-          type: integer
-          description: the value here is the ratio for 1USD
-        phone:
-          type: string
-        url:
-          type: string
-          description: Full domain (including subdomain)
-        active:
-          type: integer
-        logo:
-          type: string
-          description: a data URI image
-        organization:
-          type: string
-          format: uuid
-        start_date:
-          type: string
-          format: date
-          description: YYYY-MM-DD
-        end_date:
-          type: string
-          description: YYYY-MM-DD H:i:s
-        grace_period:
-          type: integer
-          description: The amount of days after end date, that the program is still active
-        enable_email_login:
-          type: integer
-          default: 0
-          description: >-
-            0 = Disabled, 1 = enabled.  When enabled, this permits participants
-            to login to the marketplace using their email address and password.
-        timezone:
-          type: string
-          description: >-
-            Options: America/New_York, America/Chicago, America/Denver,
-            America/Phoenix, America/Los_Angeles, America/Anchorage,
-            America/Adak, Pacific/Honolulu
-    ProgramUpdate:
-      type: object
-      properties:
-        name:
-          type: string
-          description: the name of the program
-        point:
-          type: integer
-          description: the value here is the ratio for 1USD
-        phone:
-          type: string
-        url:
-          type: string
-          description: Full domain (including subdomain)
-        active:
-          type: integer
-        logo:
-          type: string
-          description: a data URI image
-        organization:
-          type: string
-          format: uuid
-        start_date:
-          type: string
-          format: date
-          description: YYYY-MM-DD
-        end_date:
-          type: string
-          description: YYYY-MM-DD H:i:s
-        grace_period:
-          type: integer
-          description: The amount of days after end date, that the program is still active
-        enable_email_login:
-          type: integer
-          default: 0
-          description: >-
-            1 is true 0 is false.  When enabled, this permits participants to
-            login to the marketplace using their email address and password.
-        timezone:
-          type: string
-          description: >-
-            Options: America/New_York, America/Chicago, America/Denver,
-            America/Phoenix, America/Los_Angeles, America/Anchorage,
-            America/Adak, Pacific/Honolulu
-    ProgramMetrics:
-      description: Fetch simple program metrics.
-      type: object
-      properties:
-        participant_total:
-          description: Total number of active participants.
-          type: integer
-        transaction_total:
-          type: integer
-        adjustment_total:
-          type: integer
-    OrganizationList:
-      type: object
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-          description: the unique identifier of the organization
-        name:
-          type: string
-          description: the name of the organization
-        industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
-        accounts_payable_contact_reference:
-          description: null reference
-          type: string
-        company_contact_reference:
-          description: Null reference.
-          type: string
-        id:
-          description: null reference
-          type: integer
-        program_count:
-          description: The quantity of programs configured under this account.
-          type: integer
-        active:
-          type: integer
-        parent:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-        updated_at:
-          type: string
-    OrganizationRead:
-      type: object
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-          description: the unique identifier of the organization
-        parent:
-          type: string
-          format: uuid
-          description: the parent organization
-        name:
-          type: string
-          description: the name of the organization
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        domains:
-          type: array
-          items:
-            type: string
-        industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
-        id:
-          type: integer
-        active:
-          type: integer
-          description: 1 for true 0 for false
-        company_contact:
-          $ref: '#/components/schemas/Contact'
-        accounts_payable_contact:
-          $ref: '#/components/schemas/AccountingContact'
-    OrganizationCreate:
-      type: object
-      required:
-        - unique_id
-        - name
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-          description: the unique identifier of the organization
-        parent:
-          type: string
-          format: uuid
-          description: the parent organization
-        name:
-          type: string
-          description: the name of the organization
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        domains:
-          type: array
-          items:
-            type: string
-        industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
-        id:
-          type: integer
-        active:
-          type: integer
-          description: 1 for true 0 for false
-        company_contact:
-          $ref: '#/components/schemas/Contact'
-        accounts_payable_contact:
-          $ref: '#/components/schemas/AccountingContact'
-    OrganizationUpdate:
-      type: object
-      required:
-        - unique_id
-        - name
-      properties:
-        unique_id:
-          type: string
-          format: uuid
-          description: the unique identifier of the organization
-        parent:
-          type: string
-          format: uuid
-          description: the parent organization
-        name:
-          type: string
-          description: the name of the organization
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        domains:
-          type: array
-          items:
-            type: string
-        industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
-        id:
-          type: integer
-        active:
-          type: integer
-          description: 1 for true 0 for false
-        company_contact:
-          $ref: '#/components/schemas/Contact'
-        accounts_payable_contact:
-          $ref: '#/components/schemas/AccountingContact'
-    WebhookCreate:
-      allOf:
-        - type: object
-          properties:
-            username:
-              type: string
-              description: Username to be used for basic authentication.
-            password:
-              type: string
-              description: Password to be used for basic authentication.
-            title:
-              type: string
-              description: Webhook Title
-            url:
-              type: string
-              description: URL The webhook POSTS data to.
-            event:
-              type: string
-              description: Which event is this webhook sending Transaction.create
-            active:
-              type: integer
-              description: Is this webhook active?  0 = false, 1 = true
-            immutable:
-              type: integer
-              description: Can this webhook be modified? 0 = false, 1 = true
-            created_at:
-              type: string
-            updated_at:
-              type: string
-    WebhookRead:
-      type: object
-      properties:
-        id:
-          type: integer
-          description: the unique identifier of the webhook
-        title:
-          type: string
-          description: Webhook Title
-        url:
-          type: string
-          description: URL The webhook POSTS data to.
-        event:
-          type: string
-          description: Which event is this webhook sending Transaction.create
-        active:
-          type: integer
-          description: Is this webhook active?  0 = false, 1 = true
-        immutable:
-          type: integer
-          description: Can this webhook be modified? 0 = false, 1 = true
-        created_at:
-          type: string
-        updated_at:
-          type: string
-    WebhookLogs:
-      type: object
-      properties:
-        webhookLogs:
-          type: array
-          items:
-            $ref: '#/components/schemas/WebhookLog'
-    WebhookLog:
-      type: object
-      properties:
-        _id:
-          type: object
-          properties:
-            $oid:
-              type: string
-        request_time:
-          type: object
-        http_status:
-          type: integer
-          description: >-
-            Most recent HTTP status response to webhook's last attempt at
-            running.
-        responses:
-          type: array
-          items:
-            $ref: '#/components/schemas/httpResponse'
-        request:
-          $ref: '#/components/schemas/httpRequest'
-    WebhookReplayResponse:
-      type: object
-      properties:
-        http_status_code:
-          type: integer
-          description: The HTTP response of the server the webhook was replayed to.
-    httpRequest:
-      type: object
-      properties:
-        headers:
-          type: object
-        body:
-          type: string
-    httpResponse:
-      allOf:
-        - $ref: '#/components/schemas/httpRequest'
-        - type: object
-          properties:
-            http_status:
-              type: integer
-    CreateTransaction:
-      type: object
-      properties:
-        issue_points:
-          type: boolean
-          description: defaults to false
-          default: false
-        shipping:
-          $ref: '#/components/schemas/Address'
-        products:
-          type: array
-          items:
-            $ref: '#/components/schemas/ProductForTransaction'
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-    Transaction:
-      type: object
-      properties:
-        id:
-          type: integer
-          format: int32
-        unique_id:
-          type: string
-          format: uuid
-        wholesale:
-          type: string
-          format: float
-        subtotal:
-          type: string
-          format: float
-        total:
-          type: string
-          format: float
-        email_address:
-          type: string
-        locale:
-          $ref: '#/components/schemas/LanguageEnum'
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        points:
-          type: string
-          format: float
-        shipping:
-          $ref: '#/components/schemas/TransactionAddressRead'
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-        products:
-          type: array
-          items:
-            $ref: '#/components/schemas/TransactionProductRead'
-        user:
-          $ref: '#/components/schemas/ParticipantRead'
-    Product:
-      type: object
-      properties:
-        sku:
-          type: string
-        name:
-          type: string
-        description:
-          type: string
-        terms:
-          type: string
-        active:
-          type: integer
-          description: 1 for true 0 for false
-        vendor:
-          type: string
-        vendor_product_id:
-          type: string
-        digital:
-          type: integer
-          description: 1 for true 0 for false
-        category:
-          $ref: '#/components/schemas/Category'
-        brand:
-          $ref: '#/components/schemas/Category'
-        group:
-          type: array
-          items:
-            $ref: '#/components/schemas/Category'
-        price_ranged:
-          type: integer
-          description: 1 for true 0 for false
-        price_ranged_min:
-          type: string
-          format: float
-        price_ranged_max:
-          type: string
-          format: float
-        price_wholesale:
-          type: string
-          format: float
-        price_retail:
-          type: string
-          format: float
-        price_shipping:
-          type: string
-          format: float
-        price_handling:
-          type: string
-          format: float
-        price_total:
-          type: string
-          format: float
-        source:
-          type: string
-        manage_inventory:
-          type: integer
-          description: 1 for true 0 for false
-        inventory_count:
-          type: integer
-        tax_exempt:
-          type: integer
-          description: 1 for true 0 for false
-        meta:
-          type: array
-          items:
-            $ref: '#/components/schemas/Meta'
-    TransactionProductRead:
-      type: object
-      properties:
-        name:
-          type: string
-        sku:
-          type: string
-        quantity:
-          type: integer
-          format: int32
-        total:
-          type: number
-          format: float
-        points:
-          type: number
-          format: float
-        guid:
-          type: string
-          format: uuid
-        reissue_date:
-          type: string
-          format: date
-          description: YYYY-MM-DD
-        returned:
-          type: boolean
-        var_amount:
-          type: number
-          format: float
-        program_fee:
-          type: number
-          format: float
-        terms_approved:
-          type: integer
-          description: 1 for true 0 for false
-        is_digital:
-          type: integer
-          description: 1 for true 0 for false
-        is_wallet_enabled:
-          type: integer
-          description: 1 for true 0 for false
-    ProductForTransaction:
-      type: object
-      properties:
-        sku:
-          type: string
-        quantity:
-          type: integer
-          format: int32
-        amount:
-          type: number
-          description: Required IF ranged product
-    Category:
-      type: object
-      properties:
-        name:
-          type: string
-        unique_id:
-          type: string
-        id:
-          type: integer
-    ParticipantIdArray:
-      type: object
-      properties:
-        participant_id:
-          type: array
-          items:
-            type: string
-          example:
-            - UNIQUE_ID1
-            - UNIQUE_ID2
-            - UNIQUE_ID3
-    Meta:
-      type: object
-      properties:
-        key:
-          type: string
-    ProductSku:
-      type: string
-    Address:
-      type: object
-      properties:
-        firstname:
-          type: string
-        lastname:
-          type: string
-        address1:
-          type: string
-        address2:
-          type: string
-        city:
-          type: string
-        state:
-          type: string
-        zip:
-          type: string
-        phone:
-          type: string
-        country:
-          type: string
-          description: Country ISO
-    TransactionAddressRead:
-      type: object
-      properties:
-        firstname:
-          type: string
-        lastname:
-          type: string
-        address1:
-          type: string
-        address2:
-          type: string
-        city:
-          type: string
-        state:
-          type: string
-        zip:
-          type: string
-        phone:
-          type: string
-        country:
-          type: integer
-          description: Country ISO
-        country_code:
-          type: string
-          description: Country Abbrev
-    PointRead:
-      properties:
-        id:
-          type: integer
-          format: int32
-        amount:
-          type: integer
-          format: int32
-        type:
-          type: string
-          description: credit to add, debit to subtract
-        reference:
-          type: string
-          description: Reference identifier for client internal use.
-        description:
-          type: string
-          description: Description visible to the participant.
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        transaction_id:
-          type: integer
-        transaction_item_id:
-          type: integer
-        completed_at:
-          type: string
-          format: datetime
-        activity:
-          type: string
-    PointWrite:
-      type: object
-      required:
-        - amount
-        - type
-      properties:
-        amount:
-          type: integer
-          format: int32
-        type:
-          type: string
-          description: credit to add, debit to subtract
-        reference:
-          type: string
-          description: Reference identifier for client use.
-        completed_at:
-          type: string
-          description: >-
-            YYYY-MM-DD Optional reference to the date a participant completed
-            the activity to receive the points.  This can be used if the date
-            the points are credited via the API is after the date the
-            participant earned the points
-        description:
-          type: string
-          description: Description visible to participant.
-        activity:
-          type: string
-    PointUpdate:
-      type: object
-      properties:
-        reference:
-          type: string
-          description: Reference identifier for client use.
-        completed_at:
-          type: string
-          description: >-
-            YYYY-MM-DD Optional reference to the date a participant completed
-            the activity to receive the points.  This can be used if the date
-            the points are credited via the API is after the date the
-            participant earned the points
-        description:
-          type: string
-          description: Description visible to participant.
-    ReturnRead:
-      type: object
-      properties:
-        id:
-          type: integer
-          format: int32
-        notes:
-          type: string
-        complete:
-          type: integer
-          format: int32
-          description: Return status
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        user:
-          $ref: '#/components/schemas/ReturnUserRead'
-        item:
-          $ref: '#/components/schemas/ReturnItemRead'
-        participant:
-          $ref: '#/components/schemas/ParticipantRead'
-    ReturnUserRead:
-      type: object
-      properties:
-        email_address:
-          type: string
-        firstname:
-          type: string
-        lastname:
-          type: string
-        active:
-          type: integer
-          format: int32
-          description: User Status
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        access_level:
-          type: integer
-        password_updated_at:
-          type: string
-          format: date
-          description: YYYY-MM-DD
-    ReturnItemRead:
-      type: object
-      properties:
-        transaction_id:
-          type: integer
-          format: int32
-          description: The transaction id of item returned
-        sku:
-          type: string
-        guid:
-          type: string
-          description: the GUID of return
-          format: uuid
-        name:
-          type: string
-        quantity:
-          type: integer
-          format: int32
-          description: The quantity of item returned
-        total:
-          type: number
-          description: Total USD value returned to participant.
-        points:
-          type: number
-          description: Total POINTS value returned to participant.
-    UserStatusEnum:
-      type: string
-      description: >-
-        Acceptable User Statuses- "1" - "ACTIVE" "2" - "HOLD" //still active "3"
-        - "INACTIVE" "4" - "CANCELLED" //sets inactive and zeros out points "5"
-        - "DATADEL" //sets inactive and delete user pii
-    IndustryProgramEnum:
-      type: integer
-      description: >-
-        Acceptable Industry Programs- 1 - "Health_Wellness" 2 - "Channel_Sales"
-        3 - "Employee_Recognition" 4 - "Consumer" 5 - "Market_Research" 6 -
-        "Loyalty_Marketing" 7 - "Rebates"
-    LanguageEnum:
-      type: string
-      enum:
-        - en_US
-        - es_US
-      description: Acceptable Language options "en_US" - "English" "es_US" - "Spanish"
-    CountryEnum:
-      type: string
-      description: Acceptable Countries
-      enum:
-        - US
-        - CA
-        - MX
-        - ES
-        - DE
-        - IN
-        - JP
-        - KR
-        - IT
-        - MY
-        - NL
-        - BR
-        - RU
-        - CN
-    Contact:
-      type: object
-      properties:
-        firstname:
-          type: string
-        lastname:
-          type: string
-        phone:
-          type: string
-        email:
-          type: string
-        address1:
-          type: string
-        address2:
-          type: string
-        city:
-          type: string
-        state:
-          type: string
-          description: ex. NY
-        zip:
-          type: string
-        id:
-          type: integer
-        reference_id:
-          type: string
-        created_at:
-          type: string
-        updated_at:
-          type: string
-      description: Program Contact
-    AccountingContact:
-      type: object
-      properties:
-        firstname:
-          type: string
-        lastname:
-          type: string
-        phone:
-          type: string
-        email:
-          type: string
-        address1:
-          type: string
-        address2:
-          type: string
-        city:
-          type: string
-        state:
-          type: string
-          description: ex. NY
-        zip:
-          type: string
-        id:
-          type: integer
-        reference_id:
-          type: string
-        created_at:
-          type: string
-        updated_at:
-          type: string
-      description: Program Accounting Contact
-    AutoRedemption:
-      type: object
-      properties:
-        product_sku:
-          type: string
-        interval:
-          type: integer
-        schedule:
-          type: string
-        all_participant:
-          type: integer
-          description: 1 for true 0 for false
-        id:
-          type: integer
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        active:
-          type: integer
-          description: 1 for true 0 for false
-        program_id:
-          type: integer
-    OneTimeAutoRedemption:
-      type: object
-      properties:
-        product_sku:
-          type: string
-        interval:
-          type: integer
-        all_participant:
-          type: integer
-          description: 1 for true 0 for false
-        id:
-          type: integer
-        redemption_date:
-          type: string
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        active:
-          type: integer
-          description: 1 for true 0 for false
-        program_id:
-          type: string
-    ProgramType:
-      type: object
-      properties:
-        id:
-          type: integer
-        name:
-          type: string
-        description:
-          type: string
-    Actions:
-      type: object
-      properties:
-        autoRedemption:
-          type: boolean
-        product:
-          type: boolean
-        vendor:
-          type: boolean
-        layout:
-          type: boolean
-        sweepstake:
-          type: boolean
-        content:
-          type: boolean
-        offlineRedemption:
-          type: boolean
-        fileUpload:
-          type: boolean
-        redemptionCampaigns:
-          type: boolean
-        programParticipantConfig:
-          type: boolean
-    Price:
-      type: object
-      properties:
-        min:
-          type: integer
-        max:
-          type: integer
-    Brand:
-      type: object
-      properties:
-        unique_id:
-          type: string
-        name:
-          type: string
-        active:
-          type: integer
-          description: 1 for true 0 for false
-    ProductCriteria:
-      type: object
-      properties:
-        price:
-          $ref: '#/components/schemas/Price'
-        categories:
-          type: array
-          items:
-            $ref: '#/components/schemas/Category'
-        products:
-          type: array
-          items:
-            $ref: '#/components/schemas/Product'
-        brands:
-          type: array
-          items:
-            $ref: '#/components/schemas/Brand'
-        groups:
-          type: array
-          items:
-            type: string
-        exclude_products:
-          type: array
-          items:
-            $ref: '#/components/schemas/Product'
-        exclude_brands:
-          type: array
-          items:
-            $ref: '#/components/schemas/Brand'
-        exclude_vendors:
-          type: array
-          items:
-            type: string
-        featured_page_title:
-          type: string
     BatchParticipant:
       type: object
       properties:
@@ -4049,34 +4640,6 @@ components:
           type: number
           format: float
           description: Updated completion percentage for the milestone
-    ShippingData:
-      type: object
-      description: Shipping tracking information for a transaction item.
-      properties:
-        guid:
-          type: string
-          format: uuid
-          description: The unique identifier for the transaction item.
-        tracking_number:
-          type: string
-          description: The shipment tracking number.
-        carrier:
-          type: string
-          description: The shipping carrier (e.g., UPS, FedEx, USPS).
-        status:
-          type: object
-          description: The current shipping status.
-          properties:
-            status:
-              type: string
-              description: The delivery status of the shipment.
-              enum:
-                - processing
-                - shipped
-                - delivered
-            status_date:
-              type: string
-              description: The date and time when the status was set (Y-m-d H:i:s).
     ServiceAward:
       type: object
       description: A service award configured for a program.
@@ -4326,7 +4889,7 @@ components:
     ServiceAwardParticipantWrite:
       type: object
       required:
-        - Participant_id
+        - participant_id
         - date
       properties:
         participant_id:
