@@ -1385,20 +1385,45 @@ paths:
                 $ref: '#/components/schemas/SharePointsResponse'
         '400':
           description: >-
-            Bad request. Possible reasons: insufficient shareable points,
-            recipient not found, cannot share with yourself, recipient is
-            inactive, amount must be greater than zero, or point sharing
-            is not enabled on the program.
+            Bad request. Returned for all error cases, including when the
+            sharer participant does not exist ("Resource does not exist").
+            Other reasons: insufficient shareable points, recipient not found
+            in the program, cannot share with yourself, recipient is inactive,
+            amount must be greater than zero, point sharing is not enabled on
+            the program, or a configured sharing limit (per transaction,
+            daily, weekly, monthly, or total) has been reached.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
-                example:
-                  - "Insufficient shareable points"
-        '404':
-          description: Sharer participant not found
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                    example:
+                      - "Insufficient shareable points"
+                  - type: object
+                    description: >-
+                      Returned when a configured program sharing limit is
+                      reached. Adds the maximum amount the participant may
+                      currently share and which threshold is limiting it.
+                    properties:
+                      errors:
+                        type: array
+                        items:
+                          type: string
+                      max_shareable:
+                        type: number
+                        description: >-
+                          The maximum amount the participant can currently
+                          share given the limiting threshold.
+                      limiting_threshold:
+                        type: string
+                        nullable: true
+                        description: >-
+                          Which configured limit is being hit (for example
+                          per_transaction, daily, weekly, monthly, total, or
+                          balance). May be null.
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/sso:
@@ -3032,11 +3057,45 @@ components:
             When enabled, participants can share their shareable points with
             other participants in the same program.
           enum: [0, 1]
-        hasShareablePoints:
+        has_shareable_points:
           type: boolean
           description: >-
             Indicates whether the program has any shareable adjustments.
             When true, point_sharing cannot be disabled.
+        share_link_label:
+          type: string
+          nullable: true
+          description: Custom label for the participant-facing share link.
+        share_total_max:
+          type: number
+          nullable: true
+          description: >-
+            Lifetime maximum a participant may share in this program. Null
+            means no limit.
+        share_per_transaction_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share in a single transaction.
+            Null means no limit.
+        share_daily_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per day. Null means no
+            limit.
+        share_weekly_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per week. Null means no
+            limit.
+        share_monthly_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per month. Null means no
+            limit.
         enable_email_login:
           type: integer
           description: >-
@@ -3176,6 +3235,36 @@ components:
             participants can share their shareable points with others.
           enum: [0, 1]
           default: 0
+        share_total_max:
+          type: number
+          nullable: true
+          description: >-
+            Lifetime maximum a participant may share in this program. Send
+            null to clear the limit. Preserved if omitted.
+        share_per_transaction_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share in a single transaction.
+            Send null to clear the limit. Preserved if omitted.
+        share_daily_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per day. Send null to
+            clear the limit. Preserved if omitted.
+        share_weekly_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per week. Send null to
+            clear the limit. Preserved if omitted.
+        share_monthly_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per month. Send null to
+            clear the limit. Preserved if omitted.
         published:
           type: integer
           description: 1 is published, 0 is unpublished.
@@ -3298,6 +3387,36 @@ components:
             1 enables point sharing between participants, 0 disables it.
             Cannot be disabled if shareable adjustments exist in the program.
           enum: [0, 1]
+        share_total_max:
+          type: number
+          nullable: true
+          description: >-
+            Lifetime maximum a participant may share in this program. Send
+            null to clear the limit. Preserved if omitted.
+        share_per_transaction_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share in a single transaction.
+            Send null to clear the limit. Preserved if omitted.
+        share_daily_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per day. Send null to
+            clear the limit. Preserved if omitted.
+        share_weekly_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per week. Send null to
+            clear the limit. Preserved if omitted.
+        share_monthly_max:
+          type: number
+          nullable: true
+          description: >-
+            Maximum amount a participant may share per month. Send null to
+            clear the limit. Preserved if omitted.
         published:
           type: integer
           description: 1 is published, 0 is unpublished.
@@ -4044,6 +4163,12 @@ components:
           description: >-
             Amount of shareable points to transfer. Must be greater than zero
             and cannot exceed the sharer's shared_credit balance.
+        message:
+          type: string
+          maxLength: 255
+          description: >-
+            Optional message to accompany the share. Trimmed and truncated to
+            255 characters.
     SharePointsResponse:
       type: object
       description: Response body after successfully sharing points.
