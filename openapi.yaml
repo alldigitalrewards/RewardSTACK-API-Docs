@@ -1,6 +1,6 @@
 openapi: 3.1.1
 info:
-  version: '2.14.3'
+  version: '2.15.0'
   title: ADR RewardSTACK™ Platform
   description: ADR RewardSTACK™ management API.
   contact:
