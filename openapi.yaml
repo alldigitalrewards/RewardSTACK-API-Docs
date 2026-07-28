@@ -2809,6 +2809,10 @@ components:
           description: >-
             Participant email address. Required on create. Must be a valid email format.
             Must be unique per program when email login is enabled.
+        program:
+          type: string
+          description: >-
+            The program unique_id the participant belongs to. Required on create.
         unique_id:
           type: string
           description: >-
