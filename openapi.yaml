@@ -4557,6 +4557,10 @@ components:
           type: array
           items:
             type: string
+        exclude_groups:
+          type: array
+          items:
+            type: string
         featured_page_title:
           type: string
     ShippingData:
