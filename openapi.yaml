@@ -4557,6 +4557,17 @@ components:
           type: array
           items:
             type: string
+        exclude_groups:
+          type: array
+          nullable: true
+          description: >-
+            Product group `unique_id` values whose members are removed from this
+            program's catalog. Exclusion always wins: a product in any excluded
+            group is removed even when a category, brand, SKU, or included group
+            would otherwise admit it. Returns `null` rather than `[]` when the
+            program has criteria but no group exclusions.
+          items:
+            type: string
         featured_page_title:
           type: string
     ShippingData:
