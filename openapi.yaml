@@ -2,7 +2,45 @@ openapi: 3.1.1
 info:
   version: '2.15.0'
   title: ADR RewardSTACK™ Platform
-  description: ADR RewardSTACK™ management API.
+  description: |
+    ADR RewardSTACK™ management API.
+
+    # Best Practices
+
+    ## Authentication and token reuse
+
+    All API requests (other than `POST /token`) are authenticated with a JSON
+    Web Token passed via the `Authorization: Bearer` header. Tokens are valid
+    for 2 hours by default and the lifetime is configurable with the
+    `hoursUntilExpiry` parameter when generating the token.
+
+    Generate a token once and use it until it expires:
+
+    - Cache the token returned by `POST /token` along with the `expires` Unix
+      timestamp included in the response.
+    - Reuse the cached token for every request until shortly before it expires,
+      then generate a new one. A well-behaved client should be generating a new
+      token at most once every hour or two.
+    - Do **not** generate a new token before every API call. Clients that
+      request a token per call will be rate limited.
+
+    ## Response compatibility
+
+    The RewardSTACK API follows [Semantic Versioning](https://semver.org/). We
+    reserve the right to add new fields to response objects at any time as part
+    of our backward-compatible versioning strategy; additive changes are not
+    considered breaking.
+
+    Client applications must implement forward-compatible JSON parsing that
+    gracefully ignores unknown fields. Configure your JSON library to skip
+    unrecognized fields rather than fail — most modern JSON libraries support
+    this behavior by default or through configuration options.
+
+    ## Rate limiting
+
+    We do not currently enforce a general rate limit on API endpoints. The
+    exception is excessive token generation, as described in "Authentication
+    and token reuse" above.
   contact:
     email: technology@alldigitalrewards.com
 servers:
