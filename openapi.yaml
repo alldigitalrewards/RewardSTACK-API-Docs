@@ -1742,6 +1742,16 @@ paths:
           description: Filter products by whether the price is ranged (true) or a fixed value (false).
           schema:
             type: boolean
+        - name: filter[currency_code]
+          in: query
+          required: false
+          description: Filter by the product's ISO 4217 currency code, for example USD or AED, compared case-insensitively. One code as `filter[currency_code]=AED`, or several with bracket syntax, `filter[currency_code][]=AED&filter[currency_code][]=USD`; repeating the key without `[]` keeps only the last value. Empty entries are ignored.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
       responses:
         '200':
           description: successful operation
@@ -4640,6 +4650,11 @@ components:
       properties:
         sku:
           type: string
+        currency_code:
+          type:
+            - "string"
+            - "null"
+          description: ISO 4217 code of the reward's currency, for example USD or AED. Null only while a program's catalog bundle predates the field.
         digital:
           type: boolean
         price_ranged:
