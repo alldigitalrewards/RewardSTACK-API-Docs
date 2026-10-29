@@ -14,6 +14,10 @@ info:
     ## URL Pattern
     All endpoints follow the pattern: `https://example.com/some/url/{uuid}`
     where `{uuid}` is replaced with the participant's unique identifier.
+
+    ## Timeouts
+    Every request has a 10-second connect timeout and a 10-second response timeout,
+    and is sent once, with no retry.
   version: 1.0.0
   contact:
     name: All Digital Rewards
@@ -208,7 +212,9 @@ paths:
       summary: Get Participant PII
       description: |
         Retrieves personally identifiable information (PII) for a participant including
-        contact information, available credit, and shipping address.
+        contact information and available credit.
+        When a shipping URL is also set up for the program, the service then calls
+        Get Participant Shipping Address for the address.
       operationId: getParticipantPii
       tags:
         - Participants
@@ -263,6 +269,57 @@ paths:
         - ApiKeyAuth: []
         - BearerAuth: []
 
+  /participants/{uuid}/shipping:
+    get:
+      summary: Get Participant Shipping Address
+      description: |
+        Retrieves the participant's shipping address. Called right after a successful
+        Get Participant PII, and only when a shipping URL is set up for the program.
+        This URL is set up separately from the PII URL; the path here is an example.
+        The request has no body and uses the same authentication as the PII request.
+        If the reply is not a 2xx with an address, or the request times out, the
+        participant is used without a shipping address.
+      operationId: getParticipantShippingAddress
+      tags:
+        - Participants
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          description: Unique identifier of the participant
+          schema:
+            type: string
+            example: "participant_id_12345"
+        - name: lang
+          in: query
+          required: false
+          description: Language/locale preference
+          schema:
+            type: string
+            default: "en_US"
+            example: "en_US"
+      responses:
+        '200':
+          description: Shipping address successfully retrieved (any 2xx status is accepted)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - address
+                properties:
+                  address:
+                    $ref: '#/components/schemas/Address'
+        '4XX':
+          description: Any error status. The participant is used without a shipping address.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+        - ApiKeyAuth: []
+        - BearerAuth: []
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -285,8 +342,6 @@ components:
         - firstname
         - lastname
         - phone
-        - language
-        - address
         - program
       properties:
         email_address:
@@ -316,10 +371,15 @@ components:
           example: "1234567890"
         language:
           type: string
-          description: Participant's preferred language
+          description: Participant's preferred language. Optional; the service does not read it.
           example: "en_US"
         address:
-          $ref: '#/components/schemas/Address'
+          allOf:
+            - $ref: '#/components/schemas/Address'
+          description: |
+            Optional; the service does not read it. The address comes from
+            Get Participant Shipping Address instead, and is empty when no shipping
+            URL is set up for the program.
         program:
           type: string
           description: Program identifier the participant belongs to

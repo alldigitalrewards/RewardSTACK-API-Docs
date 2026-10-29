@@ -48,13 +48,21 @@ info:
 
     ## Errors
 
-    Each operation lists the error responses it returns. Error bodies are not
-    the same everywhere: depending on the operation, the body is a list of
-    messages, an object with `message`, an object with `message` and
-    `errors`, or, for service awards, an object with `error`. A `401` with
-    `{"message": "Forbidden"}` means the token's user cannot access the
-    organization or program in the URL. An unexpected error answers `500`
-    with `{"status": "error", "message": "Internal server error"}`.
+    Each operation lists the error responses it returns; check an
+    operation's responses for its exact body. Error bodies differ by
+    service. RewardSTACK endpoints answer `500` with `{"status": "error",
+    "message": "Internal server error"}`; other errors are a message
+    object, sometimes with an `errors` list, or a plain list of strings.
+    Service awards use an `error` field; the `401` and the `404` for a
+    missing program use `status` and `message` instead. Milestones use a
+    `message` field; the `401` and the `404` for a missing program also
+    use `status` and `message`, and a field-validation `400` is an object
+    keyed by field name. The catalog search answers errors with a list of
+    strings, and `401` with either a message object or a plain `Forbidden`
+    body, for a role that cannot use it. Batch endpoints answer validation
+    errors with an object holding an `errors` list, and `401` the same two
+    ways, for a missing token or a caller without access to the
+    organization or program in the request.
   contact:
     email: technology@alldigitalrewards.com
 servers:
@@ -116,7 +124,9 @@ tags:
   - name: Milestone > Participant Progress
     description: Operations for participant milestone progress tracking.
   - name: Batch
-    description: Batch operations for creating multiple resources at once.
+    description: >-
+      Batch operations for creating multiple resources at once, and
+      checking the result.
 paths:
   /token:
     post:
@@ -2847,7 +2857,12 @@ paths:
         - Program > Catalog
       summary: Catalog Search
       operationId: CatalogSearch
-      description: Returns a paginated collection of products for the specified program.
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns a paginated collection of products for the specified program.
+        Only a bearer token whose user has an admin or program admin role
+        can use this operation; any other role gets 401.
       parameters:
         - name: programId
           in: path
@@ -2865,11 +2880,53 @@ paths:
         - name: limit
           in: query
           required: false
-          description: The number of products to return per page. Allowed values are 10, 30, 50, 100.
+          description: >-
+            The number of products to return per page. Allowed values are
+            10, 30, 50, 100, 1000. Any other value is treated as 30.
           schema:
             type: integer
-            enum: [ 10, 30, 50, 100 ]
+            enum: [ 10, 30, 50, 100, 1000 ]
             default: 30
+        - name: sort[field]
+          in: query
+          required: false
+          description: Field to sort by. Any other value is treated as sku.
+          schema:
+            type: string
+            enum: [ sku, price ]
+            default: sku
+        - name: sort[direction]
+          in: query
+          required: false
+          description: Sort direction. Any other value is treated as ASC.
+          schema:
+            type: string
+            enum: [ ASC, DESC ]
+            default: ASC
+        - name: filter[vendor]
+          in: query
+          required: false
+          description: Filter by the product's vendor, exact match, case-insensitive.
+          schema:
+            type: string
+        - name: filter[exact_name]
+          in: query
+          required: false
+          description: >-
+            Filter by product name. Like filter[name], but every search
+            term must match, not just one, so results are narrower.
+          schema:
+            type: string
+        - name: filter[excluded_sku]
+          in: query
+          required: false
+          description: Exclude product SKU(s). Can be a single SKU or an array of SKUs.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
         - name: filter[sku]
           in: query
           required: false
@@ -3000,9 +3057,33 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CatalogProduct'
+        '400':
+          description: >-
+            Returned for any error building the response, including when
+            the program has no catalog bundle, an unsupported locale is
+            requested, or a filter value is invalid.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - No catalog bundle is available for this program.
+        '401':
+          description: >-
+            Missing or invalid bearer token, or a token whose user does
+            not have an admin or program admin role.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/MessageResponse'
+                  - type: string
+              example:
+                message: Unauthorized.
         default:
           description: Unknown exception
-  
 
   /api/program/{programId}/service-award:
     get:
@@ -4603,6 +4684,15 @@ paths:
       operationId: batchParticipant
       security:
         - Bearer: [ ]
+      description: >-
+        Each collection item is matched to an existing participant by
+        unique_id: it updates the participant if found, or creates one
+        otherwise. See each UserWrite field's description for what is
+        used and what is ignored in this request. A 201 response only
+        means the request was accepted and queued; items are validated
+        and created or updated later, asynchronously. Use GET
+        /api/batch/{uuid}/status, with the batch job's uuid, to see the
+        result for each item.
       requestBody:
         content:
           application/json:
@@ -4613,6 +4703,17 @@ paths:
       responses:
         '201':
           description: successful operation
+        '400':
+          description: Validation failure, including an oversized collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - Organization must be supplied for batch participant processing
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
         default:
           description: Unknown exception
   /api/batch/adjustment:
@@ -4623,6 +4724,11 @@ paths:
       operationId: batchAdjustent
       security:
         - Bearer: [ ]
+      description: >-
+        A 201 response only means the request was accepted and queued;
+        items are validated and created later, asynchronously. Use GET
+        /api/batch/{uuid}/status, with the batch job's uuid, to see the
+        result for each item.
       requestBody:
         content:
           application/json:
@@ -4633,6 +4739,17 @@ paths:
       responses:
         '201':
           description: successful operation
+        '400':
+          description: Validation failure, including an oversized collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - Program must be supplied for batch participant processing
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
         default:
           description: Unknown exception
   /api/batch/transaction:
@@ -4643,6 +4760,12 @@ paths:
       operationId: batchTransaction
       security:
         - Bearer: [ ]
+      description: >-
+        See each CreateTransaction field's description for what is used
+        and what is ignored in this request. A 201 response only means
+        the request was accepted and queued; items are validated and
+        created later, asynchronously. Use GET /api/batch/{uuid}/status,
+        with the batch job's uuid, to see the result for each item.
       requestBody:
         content:
           application/json:
@@ -4653,6 +4776,97 @@ paths:
       responses:
         '201':
           description: successful operation
+        '400':
+          description: Validation failure, including an oversized collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - The request import dataset is empty
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
+        default:
+          description: Unknown exception
+  /api/batch/{uuid}/status:
+    get:
+      tags:
+        - Batch
+      summary: Get the per-item results of a submitted batch
+      operationId: getBatchJobStatus
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns a paginated list of the rows in a submitted batch, each
+        with the result of processing it. This is the only way to see
+        whether an individual participant, adjustment, or transaction
+        succeeded.
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          description: The batch job's unique identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: program
+          in: query
+          required: true
+          description: The program unique_id the batch job was submitted for.
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 100
+        - name: filter
+          in: query
+          required: false
+          description: Filter the rows returned.
+          schema:
+            type: object
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BatchJobStatusItem'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalCount:
+                    type: integer
+                  totalPageCount:
+                    type: integer
+        '400':
+          description: The program query parameter was not provided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - A program must be provided.
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
         default:
           description: Unknown exception
 
@@ -4717,6 +4931,18 @@ components:
           example:
             status: error
             message: Missing or invalid Authorization header
+    BatchUnauthorized:
+      description: >-
+        Missing or invalid bearer token, or the token's user does not have
+        access to the organization or program in the request.
+      content:
+        application/json:
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/MessageResponse'
+              - type: string
+          example:
+            message: Token not found
   securitySchemes:
     BasicAuth:
       type: http
@@ -4951,7 +5177,11 @@ components:
           maxLength: 50
         phone:
           type: string
-          description: Participant phone number.
+          description: >-
+            Participant phone number. In a batch participant request
+            (POST /api/batch/participant), this top-level field is
+            ignored on create; on update, phone is read from
+            address.phone instead.
         birthdate:
           type: string
           description: Participant birthdate in YYYY-MM-DD format.
@@ -4959,16 +5189,28 @@ components:
           example: '1990-01-15'
         password:
           type: string
-          description: Participant password. If provided, password_confirm must also be provided and match.
+          description: >-
+            Participant password. If provided, password_confirm must
+            also be provided and match. Ignored in a batch participant
+            request (POST /api/batch/participant).
         password_confirm:
           type: string
-          description: Must match password if password is provided.
+          description: >-
+            Must match password if password is provided. Ignored in a
+            batch participant request (POST /api/batch/participant).
         active:
           type: integer
-          description: 1 for active, 0 for inactive.
+          description: >-
+            1 for active, 0 for inactive. Ignored in a batch participant
+            request (POST /api/batch/participant); a batch-created
+            participant is always active.
           enum: [0, 1]
           default: 1
         status:
+          description: >-
+            Ignored in a batch participant request (POST
+            /api/batch/participant); a batch-created participant is
+            always ACTIVE.
           $ref: '#/components/schemas/UserStatusEnum'
         language:
           type: string
@@ -6041,24 +6283,33 @@ components:
           description: >-
             Email address for the transaction. Must be a valid email.
             Required for digital products if participant has no email on file.
+            Ignored in a batch transaction request (POST /api/batch/transaction).
         phone:
           type: string
-          description: Phone number for the transaction. Must be a valid phone number if provided.
+          description: >-
+            Phone number for the transaction. Must be a valid phone number
+            if provided. Ignored in a batch transaction request (POST
+            /api/batch/transaction).
         unique_id:
           type: string
-          description: Optional transaction unique identifier.
+          description: >-
+            Optional transaction unique identifier. Ignored in a batch
+            transaction request (POST /api/batch/transaction); it is
+            always null there.
         transaction_source:
           type: string
           description: >-
             Transaction source identifier. Reserved values (AUTO_REDEMPTION,
             MARKETPLACE, CUSTOMER_SERVICE, GAMES, KIA_KASH, REDEMPTION_CAMPAIGNS,
-            SWEEPSTAKE) cannot be used unless the caller is a superadmin.
+            SWEEPSTAKE) cannot be used unless the caller is a superadmin. In a
+            batch transaction request (POST /api/batch/transaction), it is
+            always set to BATCH, regardless of what is sent.
         avs_disabled:
           type: boolean
           description: >-
             When true, disables Address Verification Service for this transaction
-            even if the program has AVS enabled. Defaults to false.
-          default: false
+            even if the program has AVS enabled. Defaults to false. Ignored
+            in a batch transaction request (POST /api/batch/transaction).
         meta:
           type: array
           items:
@@ -7104,6 +7355,16 @@ components:
             status_date:
               type: string
               description: The date and time when the status was set (Y-m-d H:i:s).
+    CatalogLocalizedText:
+      description: >-
+        Text keyed by locale, for example {"en_US": "Widget"}. An empty
+        array when no locale has a value.
+      type:
+        - "object"
+        - "array"
+      additionalProperties:
+        type: string
+      items: {}
     CatalogProduct:
       type: object
       properties:
@@ -7137,66 +7398,35 @@ components:
           format: float
           description: Present when `price_ranged` is `true`.
         category:
-          type: object
+          type:
+            - "object"
+            - "null"
+          description: Null when the product has no category.
           properties:
             unique_id:
               type: string
             name:
-              type: array
-              items:
-                type: object
-                properties:
-                  locale:
-                    type: string
+              $ref: '#/components/schemas/CatalogLocalizedText'
         brand:
-          type: object
+          type:
+            - "object"
+            - "null"
+          description: Null when the product has no brand.
           properties:
             unique_id:
               type: string
             name:
-              type: array
-              items:
-                type: object
-                properties:
-                  locale:
-                    type: string
+              $ref: '#/components/schemas/CatalogLocalizedText'
         images:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         name:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         description:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         terms:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         instructions:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
-        inventory:
-          type: integer
+          $ref: '#/components/schemas/CatalogLocalizedText'
         tax_exempt:
           type: boolean
     BatchParticipant:
@@ -7208,6 +7438,11 @@ components:
           type: string
         collection:
           type: array
+          maxItems: 100000
+          description: >-
+            Participant objects to add or update. At most 100,000 per
+            request; more than that is rejected before any item is
+            processed.
           items:
             $ref: '#/components/schemas/UserWrite'
     BatchAdjustmentCollectionItem:
@@ -7227,6 +7462,10 @@ components:
           type: string
         collection:
           type: array
+          maxItems: 100000
+          description: >-
+            Adjustment objects to add. At most 100,000 per request; more
+            than that is rejected before any item is processed.
           items:
             $ref: '#/components/schemas/BatchAdjustmentCollectionItem'
     BatchTransactionCollectionItem:
@@ -7246,8 +7485,90 @@ components:
           type: string
         collection:
           type: array
+          maxItems: 100000
+          description: >-
+            Transaction objects to add. At most 100,000 per request; more
+            than that is rejected before any item is processed.
           items:
             $ref: '#/components/schemas/BatchTransactionCollectionItem'
+    BatchDateTime:
+      type: object
+      description: A PHP-serialized datetime.
+      properties:
+        date:
+          type: string
+          description: 'Format: Y-m-d H:i:s.u.'
+        timezone_type:
+          type: integer
+        timezone:
+          type: string
+    BatchJobIssuance:
+      type: object
+      description: One points or product issuance attempted for a batch row.
+      properties:
+        description:
+          type: string
+        processed:
+          oneOf:
+            - $ref: '#/components/schemas/BatchDateTime'
+            - type: 'null'
+          description: Null until this issuance has been processed.
+        errors:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: string
+        shareable:
+          type: boolean
+        createdAt:
+          $ref: '#/components/schemas/BatchDateTime'
+        updatedAt:
+          $ref: '#/components/schemas/BatchDateTime'
+    BatchJobStatusItem:
+      type: object
+      description: One row of a submitted batch, with the result of processing it.
+      properties:
+        id:
+          type: integer
+        uniqueId:
+          type: string
+          description: The participant unique_id this row is for.
+        data:
+          type: object
+          description: The row as originally submitted.
+        issuances:
+          type: array
+          description: >-
+            Points or product issuances attempted for this row. Empty
+            for a participant batch.
+          items:
+            $ref: '#/components/schemas/BatchJobIssuance'
+        processed:
+          oneOf:
+            - $ref: '#/components/schemas/BatchDateTime'
+            - type: 'null'
+          description: Null until this row has been processed.
+        errors:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: string
+        attempts:
+          type: integer
+        createdAt:
+          $ref: '#/components/schemas/BatchDateTime'
+        updatedAt:
+          $ref: '#/components/schemas/BatchDateTime'
+    BatchErrorsResponse:
+      type: object
+      description: The error body returned for batch validation failures.
+      properties:
+        errors:
+          type: array
+          items:
+            type: string
     MilestoneFieldErrors:
       type: object
       description: >-
