@@ -1,6 +1,6 @@
 openapi: 3.1.1
 info:
-  version: '2.16.0'
+  version: '2.17.0'
   title: ADR RewardSTACK™ Platform
   description: |
     ADR RewardSTACK™ management API.
@@ -21,8 +21,13 @@ info:
     - Reuse the cached token for every request until shortly before it expires,
       then generate a new one. A well-behaved client should be generating a new
       token at most once every hour or two.
-    - Do **not** generate a new token before every API call. Clients that
-      request a token per call will be rate limited.
+    - Do **not** generate a new token before every API call.
+
+    ## Failed logins
+
+    After 5 failed logins, `POST /token` answers `423 Locked` instead of
+    checking the credentials. The lock ends 15 minutes after the last failed
+    login. Check the API user and password before retrying.
 
     ## Response compatibility
 
@@ -38,9 +43,26 @@ info:
 
     ## Rate limiting
 
-    We do not currently enforce a general rate limit on API endpoints. The
-    exception is excessive token generation, as described in "Authentication
-    and token reuse" above.
+    We do not currently enforce a general rate limit on API endpoints. Failed
+    logins are limited as described in "Failed logins" above.
+
+    ## Errors
+
+    Each operation lists the error responses it returns; check an
+    operation's responses for its exact body. Error bodies differ by
+    service. RewardSTACK endpoints answer `500` with `{"status": "error",
+    "message": "Internal server error"}`; other errors are a message
+    object, sometimes with an `errors` list, or a plain list of strings.
+    Service awards use an `error` field; the `401` and the `404` for a
+    missing program use `status` and `message` instead. Milestones use a
+    `message` field; the `401` and the `404` for a missing program also
+    use `status` and `message`, and a field-validation `400` is an object
+    keyed by field name. The catalog search answers errors with a list of
+    strings, and `401` with either a message object or a plain `Forbidden`
+    body, for a role that cannot use it. Batch endpoints answer validation
+    errors with an object holding an `errors` list, and `401` the same two
+    ways, for a missing token or a caller without access to the
+    organization or program in the request.
   contact:
     email: technology@alldigitalrewards.com
 servers:
@@ -69,6 +91,8 @@ tags:
     description: Generate Single Sign On URL for Participants.
   - name: Participant > Transaction
     description: Operations for transaction management and review.
+  - name: Transaction
+    description: Transaction lookups that are not scoped to a program or participant in the URL.
   - name: Program > Catalog
     description: Search and browse the product catalog for a program.
   - name: Service Award
@@ -76,15 +100,33 @@ tags:
       Manage service awards for a program. Service awards allow you to
       automatically issue rewards (points or products) to participants based on
       milestone dates such as hire anniversaries. Awards can be configured to
-      trigger yearly or at a custom interval.
+      trigger yearly or at a custom interval. Most error bodies use an
+      error field. The 401 and the 404 for a missing program use status
+      and message instead: when the program in the URL does not exist,
+      every service award operation answers 404 with
+      {"status": "error", "message": "Program not found or invalid program ID"}.
   - name: Milestone
-    description: Operations for milestone management and review.
+    description: >-
+      Manage milestones, their activities, and participant progress toward
+      them. Most error bodies use a message field. The 401 and the 404 for
+      a missing program use status and message instead: when the bearer
+      token is missing or invalid, every milestone operation answers 401
+      with {"status": "error", "message": "Missing or invalid Authorization
+      header"} (or a message naming the specific token problem); when the
+      program in the URL does not exist, every milestone operation answers
+      404 with {"status": "error", "message": "Program not found or invalid
+      program ID"}. A field-validation failure (for example an invalid
+      milestone name or page_size) answers 400 with an object keyed by
+      field name, each value a list of error strings, with no message or
+      error wrapper.
   - name: Milestone > Activity
     description: Operations for milestone activity management.
   - name: Milestone > Participant Progress
     description: Operations for participant milestone progress tracking.
   - name: Batch
-    description: Batch operations for creating multiple resources at once.
+    description: >-
+      Batch operations for creating multiple resources at once, and
+      checking the result.
 paths:
   /token:
     post:
@@ -111,6 +153,15 @@ paths:
           schema:
             type: string
             maxLength: 255
+      requestBody:
+        required: false
+        description: >-
+          The same parameters can be sent in a JSON body instead of the query
+          string.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JwtRequest'
       responses:
         '201':
           description: JWT is returned
@@ -135,8 +186,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '423':
+          description: >-
+            Locked after 5 failed logins. The lock ends 15 minutes after the
+            last failed login.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageErrorsResponse'
+              example:
+                message: Locked
+                errors:
+                  - The resource that is being accessed is locked
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
+  /api/auth/tokens:
+    post:
+      tags:
+        - Token
+      summary: Generate a new JWT with an existing token
+      operationId: generateTokenWithToken
+      security:
+        - Bearer: [ ]
+      description: >-
+        Generates a new token for the same user as the token in the
+        `Authorization` header, without sending the API user and password
+        again. Takes the same parameters as `POST /token`, in the query string
+        or a JSON body.
+      parameters:
+        - name: hoursUntilExpiry
+          in: query
+          required: false
+          description: Number of hours until the token expires.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8760
+            default: 2
+        - name: tokenName
+          in: query
+          required: false
+          description: Optional name for the token.
+          schema:
+            type: string
+            maxLength: 255
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JwtRequest'
+      responses:
+        '201':
+          description: JWT is returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JwtResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - Token
+      summary: List generated tokens
+      operationId: listTokens
+      security:
+        - Bearer: [ ]
+      description: >-
+        Lists the tokens generated for the token's user, 30 per page. The
+        token values themselves are never returned.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number, starting at 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenReferenceList'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/tokens/invalidate:
+    post:
+      tags:
+        - Token
+      summary: Revoke a token
+      operationId: invalidateToken
+      security:
+        - Bearer: [ ]
+      description: >-
+        Revokes a token before it expires. Use the `jti` from `GET
+        /api/auth/tokens`. A revoked token can no longer be used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - jti
+              properties:
+                jti:
+                  type: string
+                  description: The token id (`jti`) from `GET /api/auth/tokens`.
+      responses:
+        '200':
+          description: Token revoked. The response has no body.
+        '400':
+          description: No `jti` was sent.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - You must provide a valid JTI to invalidate a JWT token.
+        '404':
+          description: No token with this `jti` was found for the token's user.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization:
     get:
       tags:
@@ -145,7 +339,11 @@ paths:
       operationId: getOrganizationList
       security:
         - Bearer: [ ]
-      description: Returns organization collection.
+      description: >-
+        Returns organization collection. List rows are shorter than a single
+        organization: `industry_program` and `updated_at` are always null and
+        `domains` is not returned. Use `GET /api/organization/{uniqueId}` for
+        those fields.
       parameters:
         - name: parent
           in: query
@@ -170,10 +368,28 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Set the number of desired results per page.
+          description: >-
+            Set the number of desired results per page. Values above 500 are
+            treated as 500.
           schema:
             type: integer
+            minimum: 1
             default: 30
+        - name: orderBy[field]
+          in: query
+          required: false
+          description: >-
+            Sort the list by this organization field, for example `name` or
+            `unique_id`. Send together with `orderBy[direction]`.
+          schema:
+            type: string
+        - name: orderBy[direction]
+          in: query
+          required: false
+          description: Sort direction. Send together with `orderBy[field]`.
+          schema:
+            type: string
+            enum: [asc, desc]
       responses:
         '200':
           description: successful operation
@@ -183,6 +399,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/OrganizationList'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     post:
@@ -217,6 +435,8 @@ paths:
                     type: string
                   errors:
                     type: object
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/organization/{uniqueId}:
@@ -242,8 +462,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Organization not found
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags:
         - Organization
@@ -251,6 +475,11 @@ paths:
       operationId: updateOrganization
       security:
         - Bearer: [ ]
+      description: >-
+        Not a partial update: the body is checked like a create, so `name`,
+        `unique_id` and `parent` must be sent every time, even though
+        `unique_id` and `parent` cannot change. A body with only the fields to
+        change fails with 400.
       parameters:
         - name: uniqueId
           in: path
@@ -263,7 +492,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/OrganizationUpdate'
-        description: Organization properties to update. Only include fields you wish to change.
+        description: >-
+          The full organization: `name`, `unique_id` and `parent` are required
+          on every update.
         required: true
       responses:
         '200':
@@ -283,8 +514,75 @@ paths:
                     type: string
                   errors:
                     type: object
+              example:
+                message: Validation Failed
+                errors:
+                  unique_id:
+                    Required::NON_EXISTENT_KEY: unique_id must be provided, but does not exist
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
+  /api/organization/{uniqueId}/domain:
+    get:
+      tags:
+        - Organization
+      summary: List an organization's domains
+      operationId: getOrganizationDomains
+      security:
+        - Bearer: [ ]
+      description: Returns the domains of an organization.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The organization unique_id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrganizationDomain'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/organization/{uniqueId}/balance:
+    get:
+      tags:
+        - Organization
+      summary: Get an organization's funding balance
+      operationId: getOrganizationFundingBalance
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns the organization's available funding balance. The value can be
+        up to 2 minutes old.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The organization unique_id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationBalance'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks:
     get:
       tags:
@@ -310,8 +608,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/WebhookRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Organization not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags:
         - Organization > Webhook
@@ -334,6 +636,18 @@ paths:
           description: successful operation
         '400':
           description: Invalid properties sent.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Active must be true or false.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}:
     get:
       tags:
@@ -363,8 +677,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebhookRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Webhook not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags:
         - Organization > Webhook
@@ -393,8 +711,48 @@ paths:
           description: successful operation
         '400':
           description: Invalid properties sent or webhook is immutable.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Webhook not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Organization > Webhook
+      operationId: deleteWebhook
+      security:
+        - Bearer: [ ]
+      summary: Delete a webhook
+      description: Deletes a webhook.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          description: The organization unique_id.
+          schema:
+            type: string
+        - name: webhookId
+          in: path
+          required: true
+          description: Webhook ID.
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Webhook deleted.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Webhook not found, or it belongs to another organization.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}/logs:
     get:
       tags:
@@ -424,7 +782,9 @@ paths:
         - name: status_code
           in: query
           required: false
-          description: The HTTP Status code of the last response of any given webhook log.
+          description: >-
+            The HTTP Status code of the last response of any given webhook log.
+            When sent, `last_id` is ignored.
           schema:
             type: integer
         - name: last_id
@@ -432,16 +792,23 @@ paths:
           required: false
           description: >-
             The MongoDB ObjectId of the last Webhook Log read. The response
-            will start with the next Webhook Log in line.
+            will start with the next Webhook Log in line. Ignored when
+            `status_code` is also sent.
           schema:
             type: string
       responses:
         '200':
-          description: successful operation
+          description: successful operation. The body is a list of webhook logs.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookLogs'
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookLog'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}:
     get:
       tags:
@@ -477,8 +844,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebhookLog'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Webhook log not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}/replay:
     post:
       tags:
@@ -488,9 +859,12 @@ paths:
         - Bearer: [ ]
       summary: Replay Webhook Log
       description: >-
-        Replays the Webhook. This repeats the stored request exactly
-        as you see it in the viewWebhookLog call. This will store the response and
-        return the HTTP Status code the server gave when replaying the webhook.
+        Replays the Webhook. The stored request body and headers from the
+        viewWebhookLog call are sent to the webhook's current URL. If the
+        webhook's URL has changed since the log was written, the replay goes to
+        the new URL, not the one the original request went to. This will store
+        the response and return the HTTP Status code the server gave when
+        replaying the webhook.
       parameters:
         - name: orgId
           in: path
@@ -559,6 +933,26 @@ paths:
           description: Filter by full domain URL (subdomain.domain).
           schema:
             type: string
+        - name: organization_id
+          in: query
+          required: false
+          description: Filter by the organization's internal numeric id.
+          schema:
+            type: integer
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by one or more program unique_id values.
+          schema:
+            type: array
+            items:
+              type: string
+        - name: program_type
+          in: query
+          required: false
+          description: Filter by program type name.
+          schema:
+            type: string
         - name: page
           in: query
           required: false
@@ -583,6 +977,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProgramList'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     post:
@@ -607,7 +1003,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
         '400':
-          description: Validation error
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                type: array
+                description: A list of one or more validation error messages.
+                items:
+                  type: string
+              example:
+                - Organization must not be empty
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{uniqueId}:
@@ -639,8 +1046,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Program not found
+          description: Program not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: This resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     put:
@@ -650,6 +1075,10 @@ paths:
       operationId: updateProgram
       security:
         - Bearer: [ ]
+      description: >-
+        Update program properties. `point` (the point-to-USD ratio) cannot be
+        changed after the program is created; sending the same value the
+        program already has is fine, sending a different value fails with 400.
       parameters:
         - name: uniqueId
           in: path
@@ -672,7 +1101,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
         '400':
-          description: Validation error
+          description: >-
+            Validation error, including a malformed uniqueId path value or an
+            attempt to change point after creation.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                    example:
+                      - The point ratio cannot be changed after the program has been created.
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{uniqueId}/metrics:
@@ -698,6 +1146,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramMetrics'
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          description: Unknown exception
+  /api/program/{uniqueId}/publish/{publish}:
+    put:
+      tags:
+        - Program
+      summary: Set a program's published flag.
+      operationId: updateProgramPublish
+      security:
+        - Bearer: [ ]
+      description: Sets Program.published to the given value.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: publish
+          in: path
+          required: true
+          description: 1 to publish, 0 to unpublish.
+          schema:
+            type: integer
+            enum: [0, 1]
+      responses:
+        '204':
+          description: Published flag updated.
+        '400':
+          description: >-
+            The uniqueId path value is malformed, or the update could not be
+            applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Program not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: This resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant:
@@ -765,6 +1275,18 @@ paths:
           description: Filter by meta data value (use with metaKey).
           schema:
             type: string
+        - name: exclude_unique_id
+          in: query
+          required: false
+          description: Exclude a single participant unique_id from the results.
+          schema:
+            type: string
+        - name: id_verification_status
+          in: query
+          required: false
+          description: Filter by identity verification status.
+          schema:
+            type: string
         - name: page
           in: query
           required: false
@@ -790,6 +1312,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/UserList'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     post:
@@ -816,7 +1344,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
         '400':
-          description: Validation error
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    description: >-
+                      An object keyed by field name when the body fails
+                      validation. Absent for some rejections (for example
+                      setting status to DATADEL on create).
+              example:
+                message: Validation Failed
+                errors:
+                  status:
+                    Match::DOES_NOT_MATCH: >-
+                      The status is not valid, please refer to docs for
+                      acceptable types.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/list:
@@ -855,6 +1408,20 @@ paths:
                   $ref: '#/components/schemas/UserList'
         '400':
           description: participant_id collection must be provided.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Participant ID collection must be provided in post request body.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}:
@@ -886,8 +1453,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Resource does not exist.
+          description: >-
+            Resource does not exist. No response body when the program itself
+            does not exist; a message body when the program exists but the
+            participant does not.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags:
         - Participant
@@ -897,7 +1485,10 @@ paths:
         - Bearer: [ ]
       description: >-
         Update participant properties. Cannot modify unique_id, program, organization, or credit.
-        Meta data is completely replaced (PUT semantics). Use PATCH on the /meta endpoint to merge instead.
+        Meta data sent here is merged into existing meta (upsert): keys omitted
+        from the request are left unchanged, not deleted. For a true full
+        replace that deletes omitted keys, use PUT on the dedicated /meta
+        endpoint instead. PATCH on this same path behaves identically to PUT.
       parameters:
         - name: programId
           in: path
@@ -921,7 +1512,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
         '400':
-          description: Validation error
+          description: Validation error, including a malformed uniqueId path value.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    description: An object keyed by field name when the body fails validation.
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          description: Unknown exception
+    patch:
+      tags:
+        - Participant
+      summary: Update a participant (alias of PUT).
+      operationId: patchUser
+      security:
+        - Bearer: [ ]
+      description: >-
+        Identical to PUT on this same path, including the meta-merge
+        behavior: existing meta keys omitted from the request are left
+        unchanged, not deleted.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: uniqueId
+          in: path
+          required: true
+          description: Unique ID of participant to update.
+          schema:
+            type: string
+      requestBody:
+        $ref: '#/components/requestBodies/UserWrite'
+      responses:
+        '200':
+          description: Participant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: Validation error, including a malformed uniqueId path value.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    description: An object keyed by field name when the body fails validation.
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     delete:
@@ -951,8 +1613,28 @@ paths:
       responses:
         '204':
           description: Participant PII removed.
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Participant not found.
+          description: >-
+            Participant not found. No response body when the program itself
+            does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant not valid
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/transaction:
     get:
       tags:
@@ -990,18 +1672,6 @@ paths:
           schema:
             type: integer
             minimum: 2016
-        - name: start_date
-          in: query
-          required: false
-          description: Filter transactions from this date (Y-m-d or Y-m-d H:i:s).
-          schema:
-            type: string
-        - name: end_date
-          in: query
-          required: false
-          description: Filter transactions to this date (Y-m-d or Y-m-d H:i:s).
-          schema:
-            type: string
         - name: page
           in: query
           required: false
@@ -1025,9 +1695,28 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Transaction'
+                  $ref: '#/components/schemas/TransactionListRead'
         '400':
-          description: Invalid filter parameters.
+          description: Invalid filter parameters, or the participant does not exist.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                    example:
+                      - Resource does not exist
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags:
         - Participant > Transaction
@@ -1067,9 +1756,185 @@ paths:
             Validation error. Common reasons include: product does not exist,
             participant does not have enough points (and issue_points is not true),
             address verification failed, ranged product value exceeds valid range,
-            product is out of inventory, participant is not active.
+            product is out of inventory, shipping country/state combination is
+            not configured for the product, participant is not active.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                    example:
+                      - CA/ON is not configured for SKU123
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant not active
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >-
+            No response body when the program itself does not exist. A body
+            is returned when the participant exists but is not assigned to
+            this program.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
+  /api/program/{programId}/participant/{uniqueId}/transaction/items:
+    get:
+      tags:
+        - Participant > Transaction
+      summary: Retrieve list of participant transactions, with an incentive_type filter.
+      operationId: getTransactionItemsList
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns a transaction collection. Same response shape and filters as
+        GET .../transaction, plus incentive_type.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: uniqueId
+          in: path
+          required: true
+          description: Unique ID of the participant.
+          schema:
+            type: string
+        - name: unique_id[]
+          in: query
+          required: false
+          description: An array of one or more transaction unique_id's to filter by.
+          schema:
+            type: array
+            items:
+              type: string
+        - name: year
+          in: query
+          required: false
+          description: Filter by year (YYYY). Must be > 2015 and <= current year.
+          schema:
+            type: integer
+            minimum: 2016
+        - name: incentive_type
+          in: query
+          required: false
+          description: >-
+            Filter by incentive type. egift matches digital gift-card type
+            vendors; game matches the game vendor.
+          schema:
+            type: string
+            enum: [egift, game]
+        - name: page
+          in: query
+          required: false
+          description: Page number for pagination.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: Number of results per page.
+          schema:
+            type: integer
+            default: 30
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransactionListRead'
+        '400':
+          description: >-
+            An invalid incentive_type filter, or the participant does not
+            exist.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      type: string
+                    example:
+                      - Resource does not exist
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: bogus is not valid filter.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/program/{programId}/participant/{uniqueId}/transaction/items/{guid}:
+    get:
+      tags:
+        - Participant > Transaction
+      summary: Retrieve a single transaction by one of its item GUIDs.
+      operationId: getTransactionItemsSingle
+      security:
+        - Bearer: [ ]
+      description: Returns a single transaction, looked up by one of its item GUIDs.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: uniqueId
+          in: path
+          required: true
+          description: Unique ID of the participant the transaction belongs to.
+          schema:
+            type: string
+        - name: guid
+          in: path
+          required: true
+          description: GUID of a transaction item on the transaction.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          description: The participant or the item GUID does not exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Resource does not exist
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}:
     get:
       tags:
@@ -1106,7 +1971,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/Transaction'
         '400':
-          description: Resource does not exist.
+          description: The participant or the transaction does not exist.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      type: string
+                    example:
+                      - Resource does not exist
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}/meta:
     patch:
       tags:
@@ -1145,7 +2028,25 @@ paths:
         '202':
           description: successful operation
         '400':
-          description: Invalid meta or resource does not exist.
+          description: Invalid meta, or the participant or transaction does not exist.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      type: string
+                    example:
+                      - Resource does not exist
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/transaction/{transactionId}/return/{itemGuid}:
     get:
       tags:
@@ -1187,8 +2088,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReturnRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Resource does not exist.
+          description: >-
+            No response body when the program itself does not exist. A body
+            is returned when the participant, transaction, item, or return
+            does not exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags:
         - Participant > Transaction
@@ -1236,8 +2152,31 @@ paths:
           description: Return created.
         '400':
           description: Item already returned or invalid request.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Item already returned
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Resource does not exist.
+          description: >-
+            No response body when the program itself does not exist. A body
+            is returned when the participant, transaction, or item does not
+            exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/adjustment:
     get:
       tags:
@@ -1298,6 +2237,12 @@ paths:
                   $ref: '#/components/schemas/PointRead'
         '400':
           description: Invalid date format.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags:
         - Participant > Point Adjustment
@@ -1332,6 +2277,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PointReadWithUser'
+        '400':
+          description: >-
+            Validation error, insufficient balance, or participant not
+            active.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                    example:
+                      - amount must be less than or equal to "0.00"
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant not active
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/adjustment/{adjustmentId}:
@@ -1343,6 +2311,9 @@ paths:
         Update an existing point adjustment. No single property in the body is
         required when updating. All properties not listed here will be ignored.
         Only metadata fields can be updated — amount and type cannot be changed.
+        If activity is left out of the body, it is set to an empty string
+        rather than left unchanged; send the adjustment's current activity
+        value to keep it.
       operationId: patchAdjustment
       security:
         - Bearer: [ ]
@@ -1375,8 +2346,38 @@ paths:
       responses:
         '202':
           description: Successful operation
+        '400':
+          description: >-
+            Validation error (for example description over 255 characters),
+            or participant not active.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant not active
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Adjustment not found.
+          description: >-
+            No response body when the program itself does not exist. A body
+            is returned when the participant or the adjustment does not
+            exist.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Adjustment Not Found
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}/share:
@@ -1388,7 +2389,10 @@ paths:
         Transfer shareable points from one participant to another within the
         same program. The sharer must have sufficient shareable points
         (shared_credit balance) and point_sharing must be enabled on the
-        program. Both participants must be active.
+        program. Both participants must be active. One successful share
+        writes two point adjustment rows under one shared reference: a debit
+        on the sharer and a credit on the recipient. Both rows are visible
+        on GET .../adjustment for the respective participant.
       operationId: sharePoints
       security:
         - Bearer: [ ]
@@ -1423,17 +2427,19 @@ paths:
                 $ref: '#/components/schemas/SharePointsResponse'
         '400':
           description: >-
-            Bad request. Returned for all error cases, including when the
-            sharer participant does not exist ("Resource does not exist").
-            Other reasons: insufficient shareable points, recipient not found
-            in the program, cannot share with yourself, recipient is inactive,
-            amount must be greater than zero, point sharing is not enabled on
-            the program, or a configured sharing limit (per transaction,
-            daily, weekly, monthly, or total) has been reached.
+            Bad request. Returned for most error cases, including when the
+            sharer participant exists but is not in this program ("Resource
+            does not exist"). Other reasons: insufficient shareable points,
+            recipient not found in the program, cannot share with yourself,
+            recipient is inactive, amount must be greater than zero, point
+            sharing is not enabled on the program, or a configured sharing
+            limit (per transaction, daily, weekly, monthly, or total) has
+            been reached. A sharer that does not exist at all, or is not
+            active, gets a {"message": ...} body instead.
           content:
             application/json:
               schema:
-                oneOf:
+                anyOf:
                   - type: array
                     description: A list of one or more validation error messages.
                     items:
@@ -1456,14 +2462,90 @@ paths:
                           The maximum amount the participant can currently
                           share given the limiting threshold.
                       limiting_threshold:
-                        type: string
-                        nullable: true
+                        type:
+                          - "string"
+                          - "null"
                         description: >-
                           Which configured limit is being hit (for example
                           per_transaction, daily, weekly, monthly, total, or
                           balance). May be null.
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant not active
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
+  /api/transaction/{transactionGuid}:
+    get:
+      tags:
+        - Transaction
+      summary: Resolve a transaction item GUID to its transaction and owner.
+      operationId: getTransactionByGuid
+      security:
+        - Bearer: [ ]
+      description: >-
+        Looks up a transaction item GUID and returns the identifiers needed
+        to then call the participant-scoped transaction endpoints. Not
+        scoped to a program or participant in the URL.
+      parameters:
+        - name: transactionGuid
+          in: path
+          required: true
+          description: GUID of a transaction item.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transaction_id:
+                    type: integer
+                  participant_unique_id:
+                    type: string
+                  program_unique_id:
+                    type: string
+                  guid:
+                    type: string
+                    description: The transaction item GUID from the path.
+        '400':
+          description: The caller's token does not have access to participant data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: User does not have access to Participant Data
+        '404':
+          description: No transaction item matches the given GUID.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Transaction not found for the provided GUID
+        '500':
+          description: >-
+            Unexpected error. The body is a list of strings, not the usual
+            error object.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - An unexpected error occurred
   /api/program/{programId}/participant/{uniqueId}/sso:
     post:
       tags:
@@ -1518,13 +2600,30 @@ paths:
                 $ref: '#/components/schemas/ParticipantSSO'
         '400':
           description: Resource does not exist or participant not active.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Resource does not exist
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     get:
       tags:
         - Participant > SSO
       summary: Validate a participant SSO token
-      description: Returns a participant object if the SSO token is valid.
+      description: >-
+        Returns a participant object if the SSO token is valid. The token is
+        single-use: it is consumed on the first successful validation, and a
+        second call with the same token fails with 400.
       operationId: validateSSOToken
       security:
         - Bearer: [ ]
@@ -1556,6 +2655,20 @@ paths:
                 $ref: '#/components/schemas/ParticipantRead'
         '400':
           description: Resource does not exist or no token match.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - No token match
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/meta:
     put:
       tags:
@@ -1584,9 +2697,21 @@ paths:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '200':
-          description: successful operation
+          description: successful operation. The response body is a literal empty array ([]).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {}
+              example: []
         '400':
           description: Invalid meta format or resource does not exist.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
     patch:
       tags:
         - Participant
@@ -1614,16 +2739,130 @@ paths:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '200':
-          description: successful operation
+          description: successful operation. The response body is a literal empty array ([]).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {}
+              example: []
         '400':
           description: Invalid meta format or resource does not exist.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/participant/search:
+    get:
+      tags:
+        - Participant
+      summary: Search participants across every program the caller can access.
+      operationId: searchParticipants
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns participants across all programs the token's user can
+        access, instead of a single program. Returns an empty list when the
+        user has no program access.
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: Filter by first/last name or combined name (substring search).
+          schema:
+            type: string
+        - name: email_address
+          in: query
+          required: false
+          description: Filter by email address (substring search).
+          schema:
+            type: string
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by participant unique_id (prefix search).
+          schema:
+            type: string
+        - name: active
+          in: query
+          required: false
+          description: Filter by active status (0 or 1).
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: status
+          in: query
+          required: false
+          description: Filter by participant status.
+          schema:
+            $ref: '#/components/schemas/UserStatusEnum'
+        - name: points_greater_than
+          in: query
+          required: false
+          description: Filter by minimum credit balance.
+          schema:
+            type: number
+        - name: metaKey
+          in: query
+          required: false
+          description: Filter by meta data key name (use with metaValue).
+          schema:
+            type: string
+        - name: metaValue
+          in: query
+          required: false
+          description: Filter by meta data value (use with metaKey).
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Set the number of desired results per page. Values above 500 are
+            treated as 500.
+          schema:
+            type: integer
+            minimum: 1
+            default: 30
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserList'
+        '400':
+          description: An invalid filter value was provided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/catalog:
     get:
       tags:
         - Program > Catalog
       summary: Catalog Search
       operationId: CatalogSearch
-      description: Returns a paginated collection of products for the specified program.
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns a paginated collection of products for the specified program.
+        Only a bearer token whose user has an admin or program admin role
+        can use this operation; any other role gets 401.
       parameters:
         - name: programId
           in: path
@@ -1641,11 +2880,53 @@ paths:
         - name: limit
           in: query
           required: false
-          description: The number of products to return per page. Allowed values are 10, 30, 50, 100.
+          description: >-
+            The number of products to return per page. Allowed values are
+            10, 30, 50, 100, 1000. Any other value is treated as 30.
           schema:
             type: integer
-            enum: [ 10, 30, 50, 100 ]
+            enum: [ 10, 30, 50, 100, 1000 ]
             default: 30
+        - name: sort[field]
+          in: query
+          required: false
+          description: Field to sort by. Any other value is treated as sku.
+          schema:
+            type: string
+            enum: [ sku, price ]
+            default: sku
+        - name: sort[direction]
+          in: query
+          required: false
+          description: Sort direction. Any other value is treated as ASC.
+          schema:
+            type: string
+            enum: [ ASC, DESC ]
+            default: ASC
+        - name: filter[vendor]
+          in: query
+          required: false
+          description: Filter by the product's vendor, exact match, case-insensitive.
+          schema:
+            type: string
+        - name: filter[exact_name]
+          in: query
+          required: false
+          description: >-
+            Filter by product name. Like filter[name], but every search
+            term must match, not just one, so results are narrower.
+          schema:
+            type: string
+        - name: filter[excluded_sku]
+          in: query
+          required: false
+          description: Exclude product SKU(s). Can be a single SKU or an array of SKUs.
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
         - name: filter[sku]
           in: query
           required: false
@@ -1776,9 +3057,33 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CatalogProduct'
+        '400':
+          description: >-
+            Returned for any error building the response, including when
+            the program has no catalog bundle, an unsupported locale is
+            requested, or a filter value is invalid.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example:
+                  - No catalog bundle is available for this program.
+        '401':
+          description: >-
+            Missing or invalid bearer token, or a token whose user does
+            not have an admin or program admin role.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/MessageResponse'
+                  - type: string
+              example:
+                message: Unauthorized.
         default:
           description: Unknown exception
-  
 
   /api/program/{programId}/service-award:
     get:
@@ -1809,14 +3114,17 @@ paths:
           description: Set the number of desired results per page.
           schema:
             type: integer
-            default: 30
+            default: 25
         - name: filters[active]
           in: query
           required: false
-          description: Filter by active status (0 or 1).
+          description: >-
+            Filter by active status. Only the exact string "true" matches
+            active awards. Any other value, including the number 1, matches
+            inactive awards. Send true or false.
           schema:
-            type: integer
-            enum: [0, 1]
+            type: string
+          example: "true"
         - name: filters[reward_type]
           in: query
           required: false
@@ -1824,6 +3132,25 @@ paths:
           schema:
             type: integer
             enum: [1, 2]
+        - name: filters[name]
+          in: query
+          required: false
+          description: Filter by award name, partial match.
+          schema:
+            type: string
+        - name: filters[awardId]
+          in: query
+          required: false
+          description: Filter by the award's unique identifier, exact match.
+          schema:
+            type: string
+            format: uuid
+        - name: filters[is_trigger_yearly]
+          in: query
+          required: false
+          description: Filter by whether the award triggers yearly.
+          schema:
+            type: boolean
       responses:
         '200':
           description: successful operation
@@ -1836,12 +3163,32 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/ServiceAward'
+                  current_page:
+                    type: integer
+                    description: The current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
+                  total_count:
+                    type: integer
+                    description: Total number of awards counted for the list.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
         '400':
           description: Missing or invalid program identifier
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while fetching the awards.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     post:
@@ -1880,7 +3227,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while creating the service award.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
   /api/program/{programId}/service-award/{serviceAwardId}:
@@ -1913,13 +3268,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ServiceAward'
+                $ref: '#/components/schemas/ServiceAwardDetail'
         '404':
           description: Service award not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while fetching the award.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     put:
@@ -1930,8 +3293,12 @@ paths:
       security:
         - Bearer: [ ]
       description: >-
-        Update an existing service award. Awards that have already issued
-        fulfillments cannot be modified.
+        Update an existing service award. Only include the fields you wish
+        to change. reward_type and reward_value must be sent together. Once
+        the award has a completed fulfillment, reward_type, reward_value,
+        is_trigger_yearly, interval, issuance_time, and timezone can no
+        longer be changed; name, active, and the email fields can still be
+        changed at any time.
       parameters:
         - name: programId
           in: path
@@ -1961,23 +3328,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceAward'
         '400':
-          description: Validation error
+          description: >-
+            Validation error, including sending only one of reward_type and
+            reward_value.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
         '404':
           description: Service award not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
         '422':
-          description: Award cannot be modified because it has completed fulfillments
+          description: >-
+            The award has a completed fulfillment and the request would
+            change reward_type, reward_value, is_trigger_yearly, interval,
+            issuance_time, or timezone. Other fields can still be changed.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+              example:
+                error: >-
+                  This award has completed fulfillments; its reward and
+                  schedule cannot be modified.
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while updating the service award.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     delete:
@@ -1987,7 +3371,10 @@ paths:
       operationId: deleteServiceAward
       security:
         - Bearer: [ ]
-      description: Delete a service award and its associated participant data.
+      description: >-
+        Delete a service award. The award is removed. Any of its
+        fulfillments that have not yet been processed are marked failed.
+        Participant enrollment records for the award are not removed.
       parameters:
         - name: programId
           in: path
@@ -2011,7 +3398,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: Deletion failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
   /api/program/{programId}/service-award/{serviceAwardId}/participant:
@@ -2052,14 +3447,27 @@ paths:
           description: Set the number of desired results per page.
           schema:
             type: integer
-            default: 30
+            default: 25
         - name: filters[participant_id]
           in: query
           required: false
           description: Filter results by a specific participant unique identifier.
           schema:
             type: string
-            format: uuid
+        - name: name
+          in: query
+          required: false
+          description: >-
+            Filter by participant name, partial match on first name, last
+            name, or full name.
+          schema:
+            type: string
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by participant unique identifier, prefix match.
+          schema:
+            type: string
       responses:
         '200':
           description: successful operation
@@ -2077,7 +3485,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: Failed to retrieve participant data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     post:
@@ -2136,11 +3552,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceAwardBulkResponse'
         '400':
-          description: Validation error (e.g. missing required fields or invalid date format)
+          description: >-
+            Validation error (e.g. missing required fields or invalid date
+            format). If every participant in the request fails, the
+            response adds a summary and the per-participant errors instead
+            of a plain error message.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                anyOf:
+                  - $ref: '#/components/schemas/ServiceAwardError'
+                  - type: object
+                    description: Returned when every participant in the request failed.
+                    properties:
+                      error:
+                        type: string
+                      summary:
+                        type: object
+                        properties:
+                          total_participants:
+                            type: integer
+                          successful:
+                            type: integer
+                          failed:
+                            type: integer
+                      errors:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            participant_id:
+                              type: string
+                            error_type:
+                              type: string
+                              enum:
+                                - validation_error
+                                - email_processing_error
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: Bulk upsert operation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
   /api/program/{programId}/milestone:
@@ -2167,10 +3622,12 @@ paths:
           schema:
             type: integer
             default: 1
-        - name: limit
+        - name: page_size
           in: query
           required: false
-          description: Set the number of desired results per page.
+          description: >-
+            Set the number of desired results per page. Values above 100
+            are rejected with a 400.
           schema:
             type: integer
             default: 10
@@ -2189,9 +3646,33 @@ paths:
                   current_page:
                     type: integer
                     description: Current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
                   total_count:
                     type: integer
-                    description: The total number of milestones.
+                    description: Total number of milestones for the program.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
+        '400':
+          description: page or page_size is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneFieldErrors'
+              example:
+                page_size: ["must not exceed 100"]
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while listing milestones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
     post:
@@ -2201,6 +3682,9 @@ paths:
       operationId: addMilestone
       security:
         - Bearer: [ ]
+      description: >-
+        Exactly one of reward_sku or reward_adjustment is required. Sending
+        neither, or both, is a 400.
       parameters:
         - name: programId
           in: path
@@ -2223,6 +3707,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MilestoneRead'
+        '400':
+          description: >-
+            Validation error, including sending neither or both of
+            reward_sku and reward_adjustment, or a reward_sku that is not
+            in the program's catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneFieldErrors'
+              example:
+                reward_sku: ["either reward_sku or reward_adjustment is required"]
+                reward_adjustment: ["either reward_sku or reward_adjustment is required"]
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '503':
+          description: The reward_sku could not be verified against the program catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorResponse'
+              example:
+                status: error
+                message: Unable to verify reward_sku against the catalog. Please try again.
+        '500':
+          description: An error occurred while creating the milestone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
   /api/program/{programId}/milestone/{milestoneId}:
@@ -2257,7 +3772,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/MilestoneRead'
         '404':
-          description: Milestone not found.
+          description: Milestone not found, or does not belong to the program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Milestone not found
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while fetching the milestone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
     patch:
@@ -2267,6 +3798,11 @@ paths:
       operationId: updateMilestone
       security:
         - Bearer: [ ]
+      description: >-
+        Only include the fields you wish to change. Sending activities
+        replaces every existing activity on the milestone with one new
+        activity per entry; this happens even if the milestone's activities
+        are locked.
       parameters:
         - name: programId
           in: path
@@ -2296,8 +3832,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MilestoneRead'
+        '400':
+          description: >-
+            Validation error, including sending both reward_sku and
+            reward_adjustment, or a reward_sku that is not in the
+            program's catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneFieldErrors'
+              example:
+                reward_sku: ["cannot have both reward_sku and reward_adjustment"]
+                reward_adjustment: ["cannot have both reward_sku and reward_adjustment"]
         '404':
-          description: Milestone not found.
+          description: Milestone not found, or does not belong to the program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Milestone not found
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '503':
+          description: The reward_sku could not be verified against the program catalog.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorResponse'
+              example:
+                status: error
+                message: Unable to verify reward_sku against the catalog. Please try again.
+        '500':
+          description: An error occurred while updating the milestone.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Update failed
         default:
           description: Unknown exception
   /api/program/{programId}/milestone/{milestoneId}/activity:
@@ -2308,6 +3881,10 @@ paths:
       operationId: addActivity
       security:
         - Bearer: [ ]
+      description: >-
+        When child_milestone is true, name is read as the UUID of an
+        existing milestone in the program to attach as a child, instead of
+        a free-text activity name.
       parameters:
         - name: programId
           in: path
@@ -2337,6 +3914,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActivityRead'
+        '400':
+          description: >-
+            Validation error. Also returned when child_milestone is true
+            and the given UUID is this milestone's own UUID, matches no
+            milestone in the program, or would create a circular
+            reference.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid data provided
+        '404':
+          description: Milestone not found, or does not belong to the program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Milestone not found
+        '422':
+          description: The milestone's activities are locked because progress has already been recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: >-
+                  Cannot create. Milestone progress has already been
+                  recorded, rendering the milestone immutable.
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while creating the activity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
     get:
@@ -2346,7 +3963,7 @@ paths:
       operationId: getActivityList
       security:
         - Bearer: [ ]
-      description: Returns array of activities for the specified milestone.
+      description: Returns the paginated collection of activities for the specified milestone.
       parameters:
         - name: programId
           in: path
@@ -2362,15 +3979,66 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          description: >-
+            Set the number of desired results per page. Values above 100
+            are rejected with a 400.
+          schema:
+            type: integer
+            default: 10
       responses:
         '200':
           description: successful operation
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ActivityRead'
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityRead'
+                  current_page:
+                    type: integer
+                    description: Current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
+                  total_count:
+                    type: integer
+                    description: Total number of activities for the milestone.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
+        '400':
+          description: page or page_size is invalid, or the milestone does not exist.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/MilestoneFieldErrors'
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid data provided
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while listing activities.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
 
@@ -2418,8 +4086,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActivityRead'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneFieldErrors'
+              example:
+                name: ["must be a string", "maximum 255 characters"]
         '404':
-          description: Activity not found.
+          description: Activity not found, or does not belong to the milestone or program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Activity not found
+        '422':
+          description: The milestone's activities are locked because progress has already been recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: >-
+                  Cannot update. Milestone progress has already been
+                  recorded, rendering the milestone immutable.
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while updating the activity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
     delete:
@@ -2455,19 +4157,54 @@ paths:
       responses:
         '200':
           description: Activity deleted successfully
-        '204':
-          description: Activity deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Activity deleted successfully
         '404':
-          description: Activity not found.
-  /api/program/{programId}/milestone/{milestoneId}/participant:
+          description: Activity not found, or does not belong to the milestone or program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Activity not found
+        '422':
+          description: The milestone's activities are locked because progress has already been recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: >-
+                  Cannot delete. Milestone progress has already been
+                  recorded, rendering the milestone immutable.
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while deleting the activity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Delete failed
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}/child-milestone:
     get:
       tags:
-        - Milestone > Participant Progress
-      summary: Retrieve list of participant progress for a milestone
-      operationId: getParticipantProgressList
+        - Milestone > Activity
+      summary: Retrieve child milestones linked to a milestone
+      operationId: getChildMilestoneList
       security:
         - Bearer: [ ]
-      description: Returns array of participant progress for the specified milestone.
+      description: >-
+        Returns the paginated collection of child-milestone links for the
+        milestone, added with child_milestone on the activity endpoint.
+        Each item's name holds the attached milestone's UUID.
       parameters:
         - name: programId
           in: path
@@ -2490,10 +4227,12 @@ paths:
           schema:
             type: integer
             default: 1
-        - name: limit
+        - name: page_size
           in: query
           required: false
-          description: Set the number of desired results per page.
+          description: >-
+            Set the number of desired results per page. Values above 100
+            are rejected with a 400.
           schema:
             type: integer
             default: 10
@@ -2503,9 +4242,136 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ParticipantProgress'
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityRead'
+                  current_page:
+                    type: integer
+                    description: Current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
+                  total_count:
+                    type: integer
+                    description: Total number of child milestones linked to the milestone.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
+        '400':
+          description: page or page_size is invalid, or the milestone does not exist.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/MilestoneFieldErrors'
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid data provided
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while listing child milestones.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}/participant:
+    get:
+      tags:
+        - Milestone > Participant Progress
+      summary: Retrieve list of participant progress for a milestone
+      operationId: getParticipantProgressList
+      security:
+        - Bearer: [ ]
+      description: Returns the paginated collection of participant progress for the specified milestone.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          description: >-
+            Set the number of desired results per page. Values above 100
+            are rejected with a 400.
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ParticipantProgress'
+                  current_page:
+                    type: integer
+                    description: Current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
+                  total_count:
+                    type: integer
+                    description: Total number of participants tracked for the milestone.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
+        '400':
+          description: page or page_size is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneFieldErrors'
+              example:
+                page_size: ["must not exceed 100"]
+        '404':
+          description: Milestone not found, or does not belong to the program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Milestone not found
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while listing participant progress.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
     post:
@@ -2546,17 +4412,35 @@ paths:
         required: true
       responses:
         '200':
-          description: Bulk operation completed
+          description: All participants were processed successfully.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BulkUpsertResponse'
-        '201':
-          description: Bulk operation completed
+        '207':
+          description: Some participants succeeded and some failed.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BulkUpsertResponse'
+        '400':
+          description: >-
+            The request body is not an array of participant unique IDs,
+            or the milestone does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Request body must be an array of participant unique IDs
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: Every participant in the request failed to be processed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkUpsertAllFailedResponse'
         default:
           description: Unknown exception
   /api/program/{programId}/milestone/{milestoneId}/participant/{participantId}:
@@ -2597,10 +4481,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantProgressDetail'
         '404':
-          description: Participant progress not found.
+          description: >-
+            Milestone not found (also returned when it does not belong to
+            the program), or participant progress not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant progress not found
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while fetching participant progress.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
-  /api/program/{programId}/milestone/{milestoneId}/participants/{participantId}/activity/{activityId}:
+  /api/program/{programId}/milestone/{milestoneId}/participant/{participantId}/activity/{activityId}:
     patch:
       tags:
         - Milestone > Participant Progress
@@ -2608,7 +4510,9 @@ paths:
       operationId: updateActivityCompletion
       security:
         - Bearer: [ ]
-      description: Update the completion status of a specific activity for a participant.
+      description: >-
+        Update the completion status of a specific activity for a
+        participant. An empty body marks the activity complete.
       parameters:
         - name: programId
           in: path
@@ -2643,7 +4547,7 @@ paths:
             schema:
               $ref: '#/components/schemas/ActivityCompletionUpdate'
         description: Completion status update.
-        required: true
+        required: false
       responses:
         '200':
           description: Activity completion status updated
@@ -2651,8 +4555,124 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActivityCompletionResponse'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MilestoneFieldErrors'
+              example:
+                completed: ["must be a boolean"]
         '404':
-          description: Participant progress or activity not found.
+          description: Milestone, activity, or participant progress not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant progress not found
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while updating activity completion.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
+        default:
+          description: Unknown exception
+  /api/program/{programId}/milestone/{milestoneId}/fulfillment:
+    get:
+      tags:
+        - Milestone > Participant Progress
+      summary: Retrieve reward fulfillments for a milestone
+      operationId: getMilestoneFulfillmentList
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns the paginated collection of reward fulfillment records
+        created for the milestone's participants when they complete it.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: milestoneId
+          in: path
+          required: true
+          description: The Milestone Unique Identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: participant_unique_id
+          in: query
+          required: false
+          description: Filter by participant unique identifier, partial match.
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          required: false
+          description: >-
+            Set the number of desired results per page. Values above 100
+            are rejected with a 400.
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MilestoneFulfillment'
+                  current_page:
+                    type: integer
+                    description: Current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
+                  total_count:
+                    type: integer
+                    description: Total number of fulfillments recorded for the milestone.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
+        '404':
+          description: Milestone not found, or does not belong to the program.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Milestone not found
+        '401':
+          $ref: '#/components/responses/MilestoneUnauthorized'
+        '500':
+          description: An error occurred while listing fulfillments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Internal server error
         default:
           description: Unknown exception
 
@@ -2664,6 +4684,15 @@ paths:
       operationId: batchParticipant
       security:
         - Bearer: [ ]
+      description: >-
+        Each collection item is matched to an existing participant by
+        unique_id: it updates the participant if found, or creates one
+        otherwise. See each UserWrite field's description for what is
+        used and what is ignored in this request. A 201 response only
+        means the request was accepted and queued; items are validated
+        and created or updated later, asynchronously. Use GET
+        /api/batch/{uuid}/status, with the batch job's uuid, to see the
+        result for each item.
       requestBody:
         content:
           application/json:
@@ -2674,6 +4703,17 @@ paths:
       responses:
         '201':
           description: successful operation
+        '400':
+          description: Validation failure, including an oversized collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - Organization must be supplied for batch participant processing
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
         default:
           description: Unknown exception
   /api/batch/adjustment:
@@ -2684,6 +4724,11 @@ paths:
       operationId: batchAdjustent
       security:
         - Bearer: [ ]
+      description: >-
+        A 201 response only means the request was accepted and queued;
+        items are validated and created later, asynchronously. Use GET
+        /api/batch/{uuid}/status, with the batch job's uuid, to see the
+        result for each item.
       requestBody:
         content:
           application/json:
@@ -2694,6 +4739,17 @@ paths:
       responses:
         '201':
           description: successful operation
+        '400':
+          description: Validation failure, including an oversized collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - Program must be supplied for batch participant processing
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
         default:
           description: Unknown exception
   /api/batch/transaction:
@@ -2704,6 +4760,12 @@ paths:
       operationId: batchTransaction
       security:
         - Bearer: [ ]
+      description: >-
+        See each CreateTransaction field's description for what is used
+        and what is ignored in this request. A 201 response only means
+        the request was accepted and queued; items are validated and
+        created later, asynchronously. Use GET /api/batch/{uuid}/status,
+        with the batch job's uuid, to see the result for each item.
       requestBody:
         content:
           application/json:
@@ -2714,6 +4776,97 @@ paths:
       responses:
         '201':
           description: successful operation
+        '400':
+          description: Validation failure, including an oversized collection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - The request import dataset is empty
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
+        default:
+          description: Unknown exception
+  /api/batch/{uuid}/status:
+    get:
+      tags:
+        - Batch
+      summary: Get the per-item results of a submitted batch
+      operationId: getBatchJobStatus
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns a paginated list of the rows in a submitted batch, each
+        with the result of processing it. This is the only way to see
+        whether an individual participant, adjustment, or transaction
+        succeeded.
+      parameters:
+        - name: uuid
+          in: path
+          required: true
+          description: The batch job's unique identifier.
+          schema:
+            type: string
+            format: uuid
+        - name: program
+          in: query
+          required: true
+          description: The program unique_id the batch job was submitted for.
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            default: 1
+        - name: pageSize
+          in: query
+          required: false
+          description: Set the number of desired results per page.
+          schema:
+            type: integer
+            default: 100
+        - name: filter
+          in: query
+          required: false
+          description: Filter the rows returned.
+          schema:
+            type: object
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BatchJobStatusItem'
+                  page:
+                    type: integer
+                  pageSize:
+                    type: integer
+                  totalCount:
+                    type: integer
+                  totalPageCount:
+                    type: integer
+        '400':
+          description: The program query parameter was not provided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchErrorsResponse'
+              example:
+                errors:
+                  - A program must be provided.
+        '401':
+          $ref: '#/components/responses/BatchUnauthorized'
         default:
           description: Unknown exception
 
@@ -2741,6 +4894,55 @@ components:
             $ref: '#/components/schemas/UserWrite'
       description: Participant object.
       required: true
+  responses:
+    Forbidden:
+      description: >-
+        The token's user cannot access the organization or program in the URL.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          example:
+            message: Forbidden
+    InternalError:
+      description: Unexpected error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalErrorResponse'
+          example:
+            status: error
+            message: Internal server error
+    ServiceAwardUnauthorized:
+      description: Missing, invalid, or expired bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalErrorResponse'
+          example:
+            status: error
+            message: Token not found.
+    MilestoneUnauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalErrorResponse'
+          example:
+            status: error
+            message: Missing or invalid Authorization header
+    BatchUnauthorized:
+      description: >-
+        Missing or invalid bearer token, or the token's user does not have
+        access to the organization or program in the request.
+      content:
+        application/json:
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/MessageResponse'
+              - type: string
+          example:
+            message: Token not found
   securitySchemes:
     BasicAuth:
       type: http
@@ -2758,8 +4960,8 @@ components:
     JwtRequest:
       type: object
       description: >-
-        Token generation parameters. These are passed as query parameters, not in
-        the JSON body.
+        Token generation parameters. Send them as query parameters or in a JSON
+        body.
       properties:
         hoursUntilExpiry:
           type: integer
@@ -2785,6 +4987,88 @@ components:
       properties:
         message:
           type: string
+    MessageErrorsResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+    InternalErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+    TokenReference:
+      type: object
+      description: A generated token. The token value itself is never returned.
+      properties:
+        jti:
+          type: string
+          description: The token id. Use it to revoke the token.
+        createdAt:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        expiresAt:
+          type: string
+          description: Expiry timestamp (Y-m-d H:i:s).
+        invalidatedAt:
+          type:
+            - "string"
+            - "null"
+          description: When the token was revoked (Y-m-d H:i:s), or null.
+        usageCount:
+          type: integer
+          description: How many requests used this token.
+        userId:
+          type: integer
+          description: The id of the user the token belongs to.
+        tokenName:
+          type:
+            - "string"
+            - "null"
+          description: The name given when the token was generated.
+        emailAddress:
+          type: string
+          description: The email address of the user the token belongs to.
+    TokenReferenceList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenReference'
+        page:
+          type: integer
+          description: The current page.
+        pageSize:
+          type: integer
+          description: Tokens per page (30).
+        totalCount:
+          type: integer
+          description: Total number of tokens.
+        totalPageCount:
+          type: integer
+          description: Total number of pages.
+      example:
+        data:
+          - jti: 3f6c1d2e-8a4b-4c7d-9e1f-2a3b4c5d6e7f
+            createdAt: '2026-01-15 14:05:00'
+            expiresAt: '2026-01-15 16:05:00'
+            invalidatedAt: null
+            usageCount: 12
+            userId: 42
+            tokenName: null
+            emailAddress: api-user@example.com
+        page: 1
+        pageSize: 30
+        totalCount: 1
+        totalPageCount: 1
     UserList:
       type: object
       description: >-
@@ -2801,11 +5085,15 @@ components:
           type: string
           description: Participant email address.
         credit:
-          type: number
-          description: The participant's earned (non-shareable) point balance.
+          type: string
+          description: >-
+            The participant's earned (non-shareable) point balance. Returned
+            as a quoted decimal string (for example "0.00"), not a JSON number.
         shared_credit:
-          type: number
-          description: The participant's shareable point balance.
+          type: string
+          description: >-
+            The participant's shareable point balance. Returned as a quoted
+            decimal string (for example "0.00"), not a JSON number.
         firstname:
           type: string
           description: Participant first name.
@@ -2815,7 +5103,9 @@ components:
           description: Participant last name.
           maxLength: 50
         phone:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Participant phone number.
         active:
           type: integer
@@ -2824,19 +5114,27 @@ components:
         status:
           $ref: '#/components/schemas/UserStatusEnum'
         language:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Language preference.
           default: en
         transactions_disabled:
-          type: integer
-          description: Whether transactions are disabled for this participant. 0 = enabled, 1 = disabled.
-          enum: [0, 1]
+          type: boolean
+          description: Whether transactions are disabled for this participant.
+        id_verified:
+          type:
+            - "integer"
+            - "null"
+          description: Identity verification result. Null when not yet reviewed.
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), null if never updated.
         deactivated_at:
           type:
             - "string"
@@ -2879,7 +5177,11 @@ components:
           maxLength: 50
         phone:
           type: string
-          description: Participant phone number.
+          description: >-
+            Participant phone number. In a batch participant request
+            (POST /api/batch/participant), this top-level field is
+            ignored on create; on update, phone is read from
+            address.phone instead.
         birthdate:
           type: string
           description: Participant birthdate in YYYY-MM-DD format.
@@ -2887,16 +5189,28 @@ components:
           example: '1990-01-15'
         password:
           type: string
-          description: Participant password. If provided, password_confirm must also be provided and match.
+          description: >-
+            Participant password. If provided, password_confirm must
+            also be provided and match. Ignored in a batch participant
+            request (POST /api/batch/participant).
         password_confirm:
           type: string
-          description: Must match password if password is provided.
+          description: >-
+            Must match password if password is provided. Ignored in a
+            batch participant request (POST /api/batch/participant).
         active:
           type: integer
-          description: 1 for active, 0 for inactive.
+          description: >-
+            1 for active, 0 for inactive. Ignored in a batch participant
+            request (POST /api/batch/participant); a batch-created
+            participant is always active.
           enum: [0, 1]
           default: 1
         status:
+          description: >-
+            Ignored in a batch participant request (POST
+            /api/batch/participant); a batch-created participant is
+            always ACTIVE.
           $ref: '#/components/schemas/UserStatusEnum'
         language:
           type: string
@@ -2922,14 +5236,17 @@ components:
           type: string
           description: Participant email address.
         credit:
-          type: number
-          description: The participant's earned (non-shareable) point balance.
+          type: string
+          description: >-
+            The participant's earned (non-shareable) point balance. Returned
+            as a quoted decimal string (for example "0.00"), not a JSON number.
         shared_credit:
-          type: number
+          type: string
           description: >-
             The participant's shareable point balance. These points can be
             shared with other participants in the same program when point
-            sharing is enabled.
+            sharing is enabled. Returned as a quoted decimal string (for
+            example "0.00"), not a JSON number.
         firstname:
           type: string
           description: Participant first name.
@@ -2937,10 +5254,14 @@ components:
           type: string
           description: Participant last name.
         phone:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Participant phone number.
         birthdate:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Participant birthdate (YYYY-MM-DD).
         active:
           type: integer
@@ -2952,22 +5273,36 @@ components:
           type: string
           description: Language preference.
         transactions_disabled:
-          type: integer
-          description: Whether transactions are disabled. 0 = enabled, 1 = disabled.
-          enum: [0, 1]
+          type: boolean
+          description: Whether transactions are disabled.
+        id_verified:
+          type:
+            - "integer"
+            - "null"
+          description: Identity verification result. Null when not yet reviewed.
+        password_updated_at:
+          type:
+            - "string"
+            - "null"
+          description: Timestamp the password was last changed (Y-m-d H:i:s), null if never set.
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), null if never updated.
         deactivated_at:
           type:
             - "string"
             - "null"
           description: Deactivation timestamp, null if active.
         address:
-          $ref: '#/components/schemas/Address'
+          oneOf:
+            - $ref: '#/components/schemas/Address'
+            - type: 'null'
+          description: Null when no address has been set.
         program:
           type: string
           description: The assigned program unique_id.
@@ -2978,15 +5313,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Meta'
+        share_usage:
+          type: object
+          description: Present only when the participant's program has point sharing enabled.
+          properties:
+            daily_shared:
+              type: number
+              description: Amount shared by this participant so far today.
+            weekly_shared:
+              type: number
+              description: Amount shared by this participant so far this week.
+            monthly_shared:
+              type: number
+              description: Amount shared by this participant so far this month.
+            total_shared:
+              type: number
+              description: Lifetime amount shared by this participant.
     ParticipantSSO:
       type: object
+      description: >-
+        Returned on successful SSO token generation. There is no `redirect`
+        field: a decoded `redirect` query parameter is appended as part of the
+        `exchange` URL instead.
       properties:
         token:
           type: string
           description: The SSO token.
-        redirect:
+        participant:
           type: string
-          description: The redirect URL, present if redirect parameter was provided.
+          description: The participant's unique_id.
+        domain:
+          type: string
+          description: The bare marketplace domain (for example mydigitalrewards.com).
+        exchange:
+          type: string
+          description: >-
+            The full marketplace URL to redirect the participant's browser to,
+            including the authenticate token and, if a redirect parameter was
+            provided, the decoded redirect path.
     ProgramList:
       type: object
       description: Program object as returned in list responses.
@@ -3040,10 +5404,14 @@ components:
             America/Adak, Pacific/Honolulu.
           default: America/Phoenix
         start_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program start date (YYYY-MM-DD).
         end_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program end date (YYYY-MM-DD HH:MM:SS).
         created_at:
           type: string
@@ -3054,9 +5422,6 @@ components:
         organization:
           type: string
           description: Organization unique_id.
-        status:
-          type: string
-          description: Program status derived from active field.
         meta:
           type:
             - "array"
@@ -3096,8 +5461,12 @@ components:
           description: The point-to-USD ratio. e.g. 1 means 1 point = $1 USD.
           minimum: 1
         url:
-          type: string
-          description: The full domain URL of the program (subdomain.domain).
+          type:
+            - "string"
+            - "null"
+          description: >-
+            The full domain URL of the program (subdomain.domain). Null until
+            a domain has been assigned.
         active:
           type: integer
           description: 1 for active, 0 for inactive.
@@ -3115,36 +5484,42 @@ components:
             Indicates whether the program has any shareable adjustments.
             When true, point_sharing cannot be disabled.
         share_link_label:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Custom label for the participant-facing share link.
         share_total_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Lifetime maximum a participant may share in this program. Null
             means no limit.
         share_per_transaction_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share in a single transaction.
             Null means no limit.
         share_daily_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share per day. Null means no
             limit.
         share_weekly_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share per week. Null means no
             limit.
         share_monthly_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share per month. Null means no
             limit.
@@ -3168,27 +5543,26 @@ components:
             America/Adak, Pacific/Honolulu.
           default: America/Phoenix
         start_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program start date (YYYY-MM-DD).
         end_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program end date (YYYY-MM-DD HH:MM:SS).
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), null if never updated.
         organization:
-          type: object
-          description: The parent organization.
-          properties:
-            unique_id:
-              type: string
-            name:
-              type: string
-            id:
-              type: integer
+          type: string
+          description: The parent organization's unique_id.
         meta:
           type:
             - "array"
@@ -3196,7 +5570,9 @@ components:
           items:
             $ref: '#/components/schemas/Meta'
         cost_center_id:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Cost center identifier.
           maxLength: 45
         accounting_id:
@@ -3232,7 +5608,10 @@ components:
           items:
             $ref: '#/components/schemas/ProductSku'
         auto_redemption:
-          $ref: '#/components/schemas/AutoRedemption'
+          oneOf:
+            - $ref: '#/components/schemas/AutoRedemption'
+            - type: 'null'
+          description: Null when auto-redemption is not configured for this program.
         one_time_auto_redemptions:
           type: array
           items:
@@ -3242,14 +5621,21 @@ components:
           items:
             $ref: '#/components/schemas/ProgramType'
         actions:
-          $ref: '#/components/schemas/Actions'
+          oneOf:
+            - $ref: '#/components/schemas/Actions'
+            - type: array
+              maxItems: 0
+          description: >-
+            Map of available action booleans, keyed by action name. Serializes
+            as an empty array ([]) rather than an object when the program has
+            no assigned program types.
     ProgramCreate:
       type: object
       required:
         - unique_id
         - name
         - point
-        - Organization
+        - organization
       properties:
         unique_id:
           type: string
@@ -3424,7 +5810,10 @@ components:
           maxLength: 125
         point:
           type: number
-          description: The point-to-USD ratio.
+          description: >-
+            The point-to-USD ratio. Immutable after the program is created:
+            sending a different value than the program already has fails with
+            400. Sending the same value is fine.
           minimum: 1
         url:
           type: string
@@ -3560,7 +5949,10 @@ components:
           type: integer
     OrganizationList:
       type: object
-      description: Organization object as returned in list responses.
+      description: >-
+        Organization object as returned in list responses. `industry_program`
+        and `updated_at` are always null here and `domains` is not returned;
+        read a single organization for them.
       properties:
         unique_id:
           type: string
@@ -3574,7 +5966,12 @@ components:
           minLength: 2
           maxLength: 50
         industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
+          type:
+            - "integer"
+            - "null"
+          description: >-
+            Not filled in list responses: always null. Read a single
+            organization for the value.
         program_count:
           description: The number of programs configured under this organization.
           type: integer
@@ -3587,17 +5984,16 @@ components:
             - "string"
             - "null"
           description: Parent organization unique_id.
-        domains:
-          type: array
-          description: Domain URLs associated with this organization.
-          items:
-            type: string
         created_at:
           type: string
-          description: Creation timestamp (Y-m-d H:i:s).
+          description: Timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: >-
+            Not filled in list responses: always null. Read a single
+            organization for the value.
     OrganizationRead:
       type: object
       description: Full organization object.
@@ -3631,7 +6027,14 @@ components:
           items:
             type: string
         industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
+          type:
+            - "integer"
+            - "null"
+          description: >-
+            Industry program types: 1 = Health_Wellness, 2 = Channel_Sales,
+            3 = Employee_Recognition, 4 = Consumer, 5 = Market_Research,
+            6 = Loyalty_Marketing, 7 = Rebates. Null until set.
+          enum: [1, 2, 3, 4, 5, 6, 7, null]
         active:
           type: integer
           description: 1 for active, 0 for inactive.
@@ -3684,9 +6087,20 @@ components:
     OrganizationUpdate:
       type: object
       description: >-
-        Organization update request body. Only include fields you wish to change.
-        unique_id and parent cannot be changed on update (they will be silently ignored).
+        Organization update request body. This is not a partial update: send
+        `name`, `unique_id` and `parent` every time, as on create. `unique_id`
+        and `parent` cannot be changed on update; send their current values.
+      required:
+        - unique_id
+        - name
+        - parent
       properties:
+        unique_id:
+          type: string
+          description: The organization's current unique_id. It cannot be changed.
+        parent:
+          type: string
+          description: The organization's current parent unique_id. It cannot be changed.
         name:
           type: string
           description: The name of the organization.
@@ -3695,8 +6109,9 @@ components:
         domains:
           type: array
           description: >-
-            Replaces all existing domains. Each must be a valid domain URL and
-            unique across all organizations.
+            Domains to add. They are added to the organization's existing
+            domains; domains already on the organization are not removed. Each
+            must be a valid domain URL and unique across all organizations.
           items:
             type: string
         industry_program:
@@ -3750,9 +6165,14 @@ components:
             - "null"
           description: Password for basic authentication.
         active:
-          type: integer
-          description: Is this webhook active? 0 = false, 1 = true.
-          enum: [0, 1]
+          type:
+            - "integer"
+            - "boolean"
+          description: >-
+            Is this webhook active? 1 or true = active, 0 or false = inactive.
+            When left out, the webhook is active.
+          enum: [0, 1, true, false]
+          default: 1
         immutable:
           type: integer
           description: Can this webhook be modified? 0 = mutable, 1 = immutable.
@@ -3788,13 +6208,11 @@ components:
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
-    WebhookLogs:
-      type: object
-      properties:
-        webhookLogs:
-          type: array
-          items:
-            $ref: '#/components/schemas/WebhookLog'
+        updated_at:
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), or null.
     WebhookLog:
       type: object
       properties:
@@ -3859,56 +6277,73 @@ components:
             transaction cost before processing. Defaults to false.
           default: false
         shipping:
-          $ref: '#/components/schemas/Address'
+          $ref: '#/components/schemas/CreateTransactionShipping'
         email_address:
           type: string
           description: >-
             Email address for the transaction. Must be a valid email.
             Required for digital products if participant has no email on file.
+            Ignored in a batch transaction request (POST /api/batch/transaction).
         phone:
           type: string
-          description: Phone number for the transaction. Must be a valid phone number if provided.
+          description: >-
+            Phone number for the transaction. Must be a valid phone number
+            if provided. Ignored in a batch transaction request (POST
+            /api/batch/transaction).
         unique_id:
           type: string
-          description: Optional transaction unique identifier.
+          description: >-
+            Optional transaction unique identifier. Ignored in a batch
+            transaction request (POST /api/batch/transaction); it is
+            always null there.
         transaction_source:
           type: string
           description: >-
             Transaction source identifier. Reserved values (AUTO_REDEMPTION,
             MARKETPLACE, CUSTOMER_SERVICE, GAMES, KIA_KASH, REDEMPTION_CAMPAIGNS,
-            SWEEPSTAKE) cannot be used unless the caller is a superadmin.
+            SWEEPSTAKE) cannot be used unless the caller is a superadmin. In a
+            batch transaction request (POST /api/batch/transaction), it is
+            always set to BATCH, regardless of what is sent.
         avs_disabled:
           type: boolean
           description: >-
             When true, disables Address Verification Service for this transaction
-            even if the program has AVS enabled. Defaults to false.
-          default: false
+            even if the program has AVS enabled. Defaults to false. Ignored
+            in a batch transaction request (POST /api/batch/transaction).
         meta:
           type: array
           items:
             $ref: '#/components/schemas/Meta'
     Transaction:
       type: object
+      description: Response shape for a single transaction (create and single GET).
       properties:
         id:
           type: integer
         unique_id:
-          type: string
-        participant_id:
-          type: integer
+          type:
+            - "string"
+            - "null"
         wholesale:
-          type: number
-          format: float
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         subtotal:
-          type: number
-          format: float
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         total:
-          type: number
-          format: float
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         points:
-          type: number
-          format: float
-          description: Total points cost (total * program point ratio).
+          type: string
+          description: >-
+            Total points cost (total * program point ratio). Returned as a
+            quoted decimal string (for example "0.00"), not a JSON number.
         email_address:
           type: string
         phone:
@@ -3916,13 +6351,18 @@ components:
         type:
           type: integer
           description: Transaction type.
-        status:
+        transaction_source:
           type: string
-          description: Transaction status.
+          description: Transaction source identifier.
+        locale:
+          type: string
+          description: Locale the transaction was placed in (for example en_US).
         created_at:
           type: string
         updated_at:
-          type: string
+          type:
+            - "string"
+            - "null"
         shipping:
           $ref: '#/components/schemas/TransactionAddressRead'
         meta:
@@ -3935,6 +6375,62 @@ components:
             $ref: '#/components/schemas/TransactionProductRead'
         user:
           $ref: '#/components/schemas/ParticipantRead'
+    TransactionListRead:
+      type: object
+      description: >-
+        Response shape for a transaction list item (GET .../transaction and
+        GET .../transaction/items). Does not carry points, shipping, user,
+        or the per-product var_amount/program_fee fields that the single
+        Transaction response has.
+      properties:
+        id:
+          type: integer
+        unique_id:
+          type:
+            - "string"
+            - "null"
+        wholesale:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        subtotal:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        total:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        email_address:
+          type: string
+        phone:
+          type: string
+        type:
+          type: integer
+          description: Transaction type.
+        transaction_source:
+          type: string
+          description: Transaction source identifier.
+        locale:
+          type: string
+          description: Locale the transaction was placed in (for example en_US).
+        created_at:
+          type: string
+        updated_at:
+          type:
+            - "string"
+            - "null"
+        meta:
+          type: array
+          items:
+            $ref: '#/components/schemas/Meta'
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionListProductRead'
     TransactionProductRead:
       type: object
       properties:
@@ -3945,30 +6441,40 @@ components:
         quantity:
           type: integer
         total:
-          type: number
-          format: float
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         points:
-          type: number
-          format: float
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         guid:
           type: string
           description: Unique GUID for this transaction item.
         reissue_date:
-          type: string
-          description: Reissue date (YYYY-MM-DD).
+          type:
+            - "string"
+            - "null"
+          description: Reissue date (YYYY-MM-DD), null if not reissued.
         returned:
-          type: integer
-          description: 1 if item has been returned, 0 if not.
-          enum: [0, 1]
+          type: boolean
+          description: Whether the item has been returned.
         var_amount:
-          type: number
-          format: float
-          description: Variable amount for ranged-price products.
-        program_fee:
-          type: number
-          format: float
-        terms_approved:
           type: string
+          description: >-
+            Variable amount for ranged-price products. Returned as a quoted
+            decimal string (for example "0.00"), not a JSON number.
+        program_fee:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        terms_approved:
+          type: integer
+          description: 1 if terms were approved, 0 if not.
+          enum: [0, 1]
         is_digital:
           type: integer
           description: 1 for digital, 0 for physical.
@@ -3976,6 +6482,59 @@ components:
         is_wallet_enabled:
           type: integer
           description: 1 if wallet enabled, 0 if not.
+          enum: [0, 1]
+        is_redemption:
+          type: integer
+          description: 1 if this is a redemption-vendor product, 0 if not.
+          enum: [0, 1]
+    TransactionListProductRead:
+      type: object
+      description: >-
+        Per-product line on a transaction list item. Does not carry
+        var_amount or program_fee, unlike TransactionProductRead.
+      properties:
+        name:
+          type: string
+        sku:
+          type: string
+        quantity:
+          type: integer
+        total:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        points:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        guid:
+          type: string
+          description: Unique GUID for this transaction item.
+        reissue_date:
+          type:
+            - "string"
+            - "null"
+          description: Reissue date (YYYY-MM-DD), null if not reissued.
+        terms_approved:
+          type: integer
+          description: 1 if terms were approved, 0 if not.
+          enum: [0, 1]
+        is_digital:
+          type: integer
+          description: 1 for digital, 0 for physical.
+          enum: [0, 1]
+        returned:
+          type: boolean
+          description: Whether the item has been returned.
+        is_wallet_enabled:
+          type: integer
+          description: 1 if wallet enabled, 0 if not.
+          enum: [0, 1]
+        is_redemption:
+          type: integer
+          description: 1 if this is a redemption-vendor product, 0 if not.
           enum: [0, 1]
     ProductForTransaction:
       type: object
@@ -4047,6 +6606,38 @@ components:
           description: Two-letter country code (e.g. US, CA).
           maxLength: 2
           default: US
+    CreateTransactionShipping:
+      type: object
+      description: >-
+        Shipping address for a transaction. Unlike the participant Address
+        schema, the country field here is named country, not country_code.
+      properties:
+        firstname:
+          type: string
+          description: Recipient first name. Required for physical product shipments.
+        lastname:
+          type: string
+          description: Recipient last name.
+        address1:
+          type: string
+          description: Street address line 1.
+        address2:
+          type: string
+          description: Street address line 2.
+        city:
+          type: string
+          description: City.
+        state:
+          type: string
+          description: State abbreviation (e.g. NY). Required for US shipments with physical items.
+        zip:
+          type: string
+          description: Postal/ZIP code.
+        country:
+          type: string
+          description: Two-letter country code (e.g. US, CA).
+          maxLength: 2
+          default: US
     TransactionAddressRead:
       type: object
       properties:
@@ -4076,9 +6667,11 @@ components:
         id:
           type: integer
         amount:
-          type: number
+          type: string
           description: >-
             Point amount (displayed as amount * program point ratio).
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         type:
           type: string
           description: '"credit" to add points, "debit" to subtract points.'
@@ -4086,10 +6679,14 @@ components:
             - credit
             - debit
         reference:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Reference identifier for client internal use.
         description:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Description visible to the participant.
         shareable:
           type: integer
@@ -4123,9 +6720,35 @@ components:
             - "string"
             - "null"
           description: Activity label for the adjustment.
-        status:
+        sender_participant_id:
+          type:
+            - "integer"
+            - "null"
+          description: >-
+            Present on every adjustment. Populated with the sharer's
+            internal participant id only on the credit row a point share
+            creates for the recipient; null otherwise.
+        share_direction:
           type: string
-          description: Adjustment status.
+          enum: [sent, received]
+          description: >-
+            Only present in the list response (GET .../adjustment), and only
+            on rows created by a point share: sent on the sharer's debit
+            row, received on the recipient's credit row.
+        counterparty_name:
+          type:
+            - "string"
+            - "null"
+          description: >-
+            Only present in the list response, on point-share rows. The
+            other participant's name, or email if no name is on file.
+        share_message:
+          type:
+            - "string"
+            - "null"
+          description: >-
+            Only present in the list response, on point-share rows. The
+            message sent with the share, if any.
     PointReadWithUser:
       allOf:
         - $ref: '#/components/schemas/PointRead'
@@ -4195,7 +6818,10 @@ components:
           description: Description visible to participant.
         activity:
           type: string
-          description: Activity label for the adjustment.
+          description: >-
+            Activity label for the adjustment. If left out of the body, the
+            existing value is cleared to an empty string rather than left
+            unchanged; send the current value back to keep it.
     SharePointsRequest:
       type: object
       description: Request body for sharing points between participants.
@@ -4226,25 +6852,35 @@ components:
       description: Response body after successfully sharing points.
       properties:
         credit:
-          type: number
-          description: The sharer's remaining earned (non-shareable) point balance.
+          type: string
+          description: >-
+            The sharer's remaining earned (non-shareable) point balance.
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
         shared_credit:
-          type: number
-          description: The sharer's remaining shareable point balance after the transfer.
+          type: string
+          description: >-
+            The sharer's remaining shareable point balance after the
+            transfer. Returned as a quoted decimal string (for example
+            "0.00"), not a JSON number.
     ReturnRead:
       type: object
+      description: There is no top-level guid field; the item's own GUID is item.guid.
       properties:
         id:
           type: integer
-        guid:
-          type: string
-          description: Return GUID.
         notes:
           type: string
+        complete:
+          type: integer
+          description: 1 if the return has been completed, 0 if not.
+          enum: [0, 1]
         created_at:
           type: string
         updated_at:
-          type: string
+          type:
+            - "string"
+            - "null"
         user:
           $ref: '#/components/schemas/ReturnUserRead'
         item:
@@ -4253,11 +6889,11 @@ components:
           $ref: '#/components/schemas/ParticipantRead'
     ReturnUserRead:
       type: object
-      description: The admin user who processed the return.
+      description: >-
+        The admin user who processed the return. There is no id or email
+        field; the real field is email_address.
       properties:
-        id:
-          type: integer
-        email:
+        email_address:
           type: string
         firstname:
           type: string
@@ -4266,7 +6902,9 @@ components:
         created_at:
           type: string
         updated_at:
-          type: string
+          type:
+            - "string"
+            - "null"
     ReturnItemRead:
       type: object
       properties:
@@ -4281,6 +6919,19 @@ components:
         quantity:
           type: integer
           description: The quantity of item returned.
+        name:
+          type: string
+          description: The product name.
+        total:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
+        points:
+          type: string
+          description: >-
+            Returned as a quoted decimal string (for example "0.00"), not a
+            JSON number.
     UserStatusEnum:
       type: string
       description: >-
@@ -4292,7 +6943,7 @@ components:
         - HOLD
         - INACTIVE
         - CANCELLED
-        - SUSPENDED
+        - DATADEL
     IndustryProgramEnum:
       type: integer
       description: >-
@@ -4326,27 +6977,84 @@ components:
         - CN
     Contact:
       type: object
-      description: Contact information (read response).
+      description: Contact information (read response). Fields not set are null.
       properties:
         firstname:
-          type: string
+          type:
+            - "string"
+            - "null"
         lastname:
-          type: string
+          type:
+            - "string"
+            - "null"
         phone:
-          type: string
+          type:
+            - "string"
+            - "null"
         email:
-          type: string
+          type:
+            - "string"
+            - "null"
         address1:
-          type: string
+          type:
+            - "string"
+            - "null"
         address2:
-          type: string
+          type:
+            - "string"
+            - "null"
         city:
-          type: string
+          type:
+            - "string"
+            - "null"
         state:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: State abbreviation (e.g. NY).
         zip:
+          type:
+            - "string"
+            - "null"
+    OrganizationBalance:
+      type: object
+      properties:
+        balance:
           type: string
+          description: The available balance for the organization, as a decimal string.
+      example:
+        balance: '1250.00'
+    OrganizationDomain:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Domain id.
+        organization_id:
+          type: integer
+          description: Internal id of the organization.
+        url:
+          type: string
+          description: The domain.
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), or null.
+      example:
+        id: 12
+        organization_id: 34
+        url: rewards.example.com
+        active: 1
+        created_at: '2026-01-15 14:05:00'
+        updated_at: null
     ContactWrite:
       type: object
       description: Contact information for create/update requests.
@@ -4477,9 +7185,11 @@ components:
       type: object
       properties:
         min:
-          type: integer
+          type: string
+          description: Minimum price filter. Empty string when no minimum is configured.
         max:
-          type: integer
+          type: string
+          description: Maximum price filter. Empty string when no maximum is configured.
     Brand:
       type: object
       properties:
@@ -4645,6 +7355,16 @@ components:
             status_date:
               type: string
               description: The date and time when the status was set (Y-m-d H:i:s).
+    CatalogLocalizedText:
+      description: >-
+        Text keyed by locale, for example {"en_US": "Widget"}. An empty
+        array when no locale has a value.
+      type:
+        - "object"
+        - "array"
+      additionalProperties:
+        type: string
+      items: {}
     CatalogProduct:
       type: object
       properties:
@@ -4678,66 +7398,35 @@ components:
           format: float
           description: Present when `price_ranged` is `true`.
         category:
-          type: object
+          type:
+            - "object"
+            - "null"
+          description: Null when the product has no category.
           properties:
             unique_id:
               type: string
             name:
-              type: array
-              items:
-                type: object
-                properties:
-                  locale:
-                    type: string
+              $ref: '#/components/schemas/CatalogLocalizedText'
         brand:
-          type: object
+          type:
+            - "object"
+            - "null"
+          description: Null when the product has no brand.
           properties:
             unique_id:
               type: string
             name:
-              type: array
-              items:
-                type: object
-                properties:
-                  locale:
-                    type: string
+              $ref: '#/components/schemas/CatalogLocalizedText'
         images:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         name:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         description:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         terms:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
+          $ref: '#/components/schemas/CatalogLocalizedText'
         instructions:
-          type: array
-          items:
-            type: object
-            properties:
-              locale:
-                type: string
-        inventory:
-          type: integer
+          $ref: '#/components/schemas/CatalogLocalizedText'
         tax_exempt:
           type: boolean
     BatchParticipant:
@@ -4749,6 +7438,11 @@ components:
           type: string
         collection:
           type: array
+          maxItems: 100000
+          description: >-
+            Participant objects to add or update. At most 100,000 per
+            request; more than that is rejected before any item is
+            processed.
           items:
             $ref: '#/components/schemas/UserWrite'
     BatchAdjustmentCollectionItem:
@@ -4768,6 +7462,10 @@ components:
           type: string
         collection:
           type: array
+          maxItems: 100000
+          description: >-
+            Adjustment objects to add. At most 100,000 per request; more
+            than that is rejected before any item is processed.
           items:
             $ref: '#/components/schemas/BatchAdjustmentCollectionItem'
     BatchTransactionCollectionItem:
@@ -4787,12 +7485,150 @@ components:
           type: string
         collection:
           type: array
+          maxItems: 100000
+          description: >-
+            Transaction objects to add. At most 100,000 per request; more
+            than that is rejected before any item is processed.
           items:
             $ref: '#/components/schemas/BatchTransactionCollectionItem'
+    BatchDateTime:
+      type: object
+      description: A PHP-serialized datetime.
+      properties:
+        date:
+          type: string
+          description: 'Format: Y-m-d H:i:s.u.'
+        timezone_type:
+          type: integer
+        timezone:
+          type: string
+    BatchJobIssuance:
+      type: object
+      description: One points or product issuance attempted for a batch row.
+      properties:
+        description:
+          type: string
+        processed:
+          oneOf:
+            - $ref: '#/components/schemas/BatchDateTime'
+            - type: 'null'
+          description: Null until this issuance has been processed.
+        errors:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: string
+        shareable:
+          type: boolean
+        createdAt:
+          $ref: '#/components/schemas/BatchDateTime'
+        updatedAt:
+          $ref: '#/components/schemas/BatchDateTime'
+    BatchJobStatusItem:
+      type: object
+      description: One row of a submitted batch, with the result of processing it.
+      properties:
+        id:
+          type: integer
+        uniqueId:
+          type: string
+          description: The participant unique_id this row is for.
+        data:
+          type: object
+          description: The row as originally submitted.
+        issuances:
+          type: array
+          description: >-
+            Points or product issuances attempted for this row. Empty
+            for a participant batch.
+          items:
+            $ref: '#/components/schemas/BatchJobIssuance'
+        processed:
+          oneOf:
+            - $ref: '#/components/schemas/BatchDateTime'
+            - type: 'null'
+          description: Null until this row has been processed.
+        errors:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: string
+        attempts:
+          type: integer
+        createdAt:
+          $ref: '#/components/schemas/BatchDateTime'
+        updatedAt:
+          $ref: '#/components/schemas/BatchDateTime'
+    BatchErrorsResponse:
+      type: object
+      description: The error body returned for batch validation failures.
+      properties:
+        errors:
+          type: array
+          items:
+            type: string
+    MilestoneFieldErrors:
+      type: object
+      description: >-
+        Validation errors keyed by field name, each a list of error
+        strings. No message or error wrapper.
+      additionalProperties:
+        type: array
+        items:
+          type: string
+    MilestoneActivitySummary:
+      type: object
+      description: >-
+        An activity as nested inside a milestone response. This is a
+        different shape from ActivityRead, which the activity endpoints
+        use.
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the activity.
+        activity_name:
+          type: string
+          description: The name of the activity.
+        type:
+          type: string
+          description: Always "activity".
+        created_at:
+          type: string
+          description: 'Datetime string, format Y-m-d H:i:s.'
+        updated_at:
+          type: string
+          description: 'Datetime string, format Y-m-d H:i:s.'
+    MilestoneChildMilestoneSummary:
+      type: object
+      description: A child-milestone link as nested inside a milestone response.
+      properties:
+        uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the link.
+        milestone_uuid:
+          type: string
+          format: uuid
+          description: The unique identifier of the attached child milestone.
+        type:
+          type: string
+          description: Always "child_milestone".
+        created_at:
+          type: string
+          description: 'Datetime string, format Y-m-d H:i:s.'
+        updated_at:
+          type: string
+          description: 'Datetime string, format Y-m-d H:i:s.'
     MilestoneCreate:
       type: object
       required:
         - name
+      description: >-
+        Exactly one of reward_sku or reward_adjustment is required.
+        Sending neither, or both, is a 400.
       properties:
         name:
           type: string
@@ -4800,10 +7636,28 @@ components:
         completed_email:
           type: string
           description: Email message to send when milestone is reached.
+        subject:
+          type: string
+          description: Subject line for milestone and fulfillment notification emails.
+        sent_from:
+          type: string
+          description: Bare email address notification emails are sent from.
+        fulfillment_email_enabled:
+          type: boolean
+          description: Whether to send the fulfillment email. Defaults to true.
+          default: true
+        reward_sku:
+          type: string
+          description: Product SKU to award when the milestone is completed.
         reward_adjustment:
           type: number
           format: float
           description: Points to award when milestone is completed
+      oneOf:
+        - required:
+            - reward_sku
+        - required:
+            - reward_adjustment
     MilestoneRead:
       type: object
       properties:
@@ -4814,28 +7668,74 @@ components:
         name:
           type: string
           description: The name of the milestone
+        reward_sku:
+          type:
+            - string
+            - "null"
+          description: Product SKU to award when the milestone is completed.
+        reward_product_name:
+          type:
+            - string
+            - "null"
+          description: The catalog product name for a SKU reward. Null for a points reward.
         completed_email:
-          type: string
+          type:
+            - string
+            - "null"
           description: Email message to send when milestone is completed
         reward_adjustment:
-          type: number
+          type:
+            - number
+            - "null"
           format: float
           description: Points to award when milestone is completed
         active:
           type: boolean
           description: Whether the milestone is active
+        activities_locked:
+          type: boolean
+          description: >-
+            True once a participant has recorded progress on this
+            milestone. Blocks create, update, and delete of its
+            activities. Read-only.
+        subject:
+          type:
+            - string
+            - "null"
+          description: Subject line for milestone and fulfillment notification emails.
+        sent_from:
+          type:
+            - string
+            - "null"
+          description: Bare email address notification emails are sent from.
+        fulfillment_email_enabled:
+          type: boolean
+          description: Whether the fulfillment email is sent.
         created_at:
           type: string
-          format: date-time
+          description: 'Datetime string, format Y-m-d H:i:s.'
         updated_at:
           type: string
-          format: date-time
+          description: 'Datetime string, format Y-m-d H:i:s.'
         activities:
           type: array
           items:
-            $ref: '#/components/schemas/ActivityRead'
+            $ref: '#/components/schemas/MilestoneActivitySummary'
+        child_milestones:
+          type: array
+          description: Milestones attached as children of this milestone. Read-only.
+          items:
+            $ref: '#/components/schemas/MilestoneChildMilestoneSummary'
+        participants_count:
+          type: integer
+          description: Number of participants with progress tracked for this milestone. Read-only.
     MilestoneUpdate:
       type: object
+      description: >-
+        Only include the fields you wish to change. Sending activities
+        replaces every existing activity on the milestone with one new
+        activity per entry (set from activity_name), even if the
+        milestone's activities are locked.
       properties:
         name:
           type: string
@@ -4843,6 +7743,15 @@ components:
         completed_email:
           type: string
           description: Email message to send when milestone is completed
+        subject:
+          type: string
+          description: Subject line for milestone and fulfillment notification emails.
+        sent_from:
+          type: string
+          description: Bare email address notification emails are sent from.
+        fulfillment_email_enabled:
+          type: boolean
+          description: Whether to send the fulfillment email.
         reward_adjustment:
           type: number
           format: float
@@ -4850,14 +7759,36 @@ components:
         active:
           type: boolean
           description: Whether the milestone is active
+        activities:
+          type: array
+          description: >-
+            Replaces every existing activity on the milestone with one new
+            activity per entry.
+          items:
+            type: object
+            properties:
+              activity_name:
+                type: string
     ActivityCreate:
       type: object
       required:
         - name
+      description: >-
+        When child_milestone is true, name is read as the UUID of an
+        existing milestone in the program to attach as a child, instead of
+        a free-text activity name.
       properties:
         name:
           type: string
-          description: The name of the activity
+          description: >-
+            The name of the activity, or the UUID of the milestone to
+            attach as a child when child_milestone is true.
+        child_milestone:
+          type: boolean
+          description: >-
+            When true, attaches an existing milestone as a child of this
+            milestone instead of creating a plain activity.
+          default: false
     ActivityRead:
       type: object
       properties:
@@ -4872,12 +7803,15 @@ components:
           type: string
           format: uuid
           description: The unique identifier of the parent milestone
+        is_child_milestone:
+          type: boolean
+          description: True when this activity is a child-milestone link added via child_milestone on create.
         created_at:
           type: string
-          format: date-time
+          description: 'Datetime string, format Y-m-d H:i:s.'
         updated_at:
           type: string
-          format: date-time
+          description: 'Datetime string, format Y-m-d H:i:s.'
     ActivityUpdate:
       type: object
       properties:
@@ -4906,7 +7840,9 @@ components:
                   completed:
                     type: boolean
                   completed_at:
-                    type: string
+                    type:
+                      - string
+                      - "null"
                     format: date-time
     ParticipantProgressDetail:
       type: object
@@ -4938,40 +7874,135 @@ components:
                   completed:
                     type: boolean
                   completed_at:
-                    type: string
+                    type:
+                      - string
+                      - "null"
                     format: date-time
+        created_at:
+          type: string
+          description: 'Datetime string, format Y-m-d H:i:s.'
+        updated_at:
+          type: string
+          description: 'Datetime string, format Y-m-d H:i:s.'
+    MilestoneFulfillment:
+      type: object
+      description: A reward fulfillment recorded for a participant on a milestone.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The unique identifier of the fulfillment record.
+        participant_unique_id:
+          type: string
+          description: The unique identifier of the participant.
+        date:
+          type: string
+          format: date
+          description: The date the milestone was completed.
+        processed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the reward was successfully issued. Null until processed.
+        reward:
+          type: string
+          enum: [sku, points]
+          description: Which kind of reward the milestone awards.
+        reward_value:
+          type: string
+          description: The product SKU, or the point amount, awarded.
+        reward_status:
+          type: string
+          description: >-
+            Current status of the fulfillment. pending: not yet attempted.
+            retrying: the reward could not be issued and it will be tried
+            again. processed: the reward was issued. failed: the
+            fulfillment will not be retried.
+          enum:
+            - pending
+            - retrying
+            - processed
+            - failed
+        failure_reason:
+          type:
+            - string
+            - "null"
+          description: Error message from the most recent failed reward attempt.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    BulkUpsertResponse:
+    BulkUpsertSuccess:
       type: object
       properties:
+        participant_unique_id:
+          type: string
+        milestone_uuid:
+          type: string
+          format: uuid
+        child_milestones_created:
+          type: integer
+          description: Number of child-milestone progress records created for this participant.
+    BulkUpsertFailure:
+      type: object
+      properties:
+        participant_unique_id:
+          type: string
+        error:
+          type: string
+    BulkUpsertResponse:
+      type: object
+      description: Returned for 200 (no failures) and 207 (some failures).
+      properties:
+        message:
+          type: string
         successes:
           type: array
           items:
-            type: string
-          description: Array of participant IDs that were successfully processed
+            $ref: '#/components/schemas/BulkUpsertSuccess'
+          description: Participants that were successfully processed.
         failures:
           type: array
+          items:
+            $ref: '#/components/schemas/BulkUpsertFailure'
+          description: Participants that failed after passing validation.
+        validation_errors:
+          type: array
+          description: Participants that failed an earlier validation check, before processing started.
           items:
             type: object
             properties:
               participant_id:
                 type: string
-              error:
+              error_type:
                 type: string
-          description: Array of participant IDs that failed with error messages
+              error_message:
+                type: string
+    BulkUpsertAllFailedResponse:
+      type: object
+      description: Returned for 500 when every participant failed. Has no validation_errors field.
+      properties:
+        message:
+          type: string
+        successes:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkUpsertSuccess'
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkUpsertFailure'
     ActivityCompletionUpdate:
       type: object
-      required:
-        - completed
+      description: An empty body marks the activity complete.
       properties:
         completed:
           type: boolean
-          description: Whether the activity is completed
+          description: Whether the activity is completed. Defaults to true when omitted.
+          default: true
     ActivityCompletionResponse:
       type: object
       properties:
@@ -4989,14 +8020,16 @@ components:
         completed:
           type: boolean
           description: Whether the activity is completed
-        completed_at:
-          type: string
-          format: date-time
-          description: When the activity was completed
         progress_percentage:
           type: number
           format: float
           description: Updated completion percentage for the milestone
+    ServiceAwardError:
+      type: object
+      description: The error body returned by service award operations.
+      properties:
+        error:
+          type: string
     ServiceAward:
       type: object
       description: A service award configured for a program.
@@ -5006,7 +8039,7 @@ components:
           format: uuid
         program_uuid:
           type: string
-          format: uuid
+          description: The program's unique_id.
         name:
           type: string
           description: Display name of the service award.
@@ -5019,6 +8052,13 @@ components:
           description: >-
             The reward amount. For points this is the number of points to issue.
             For SKU this is the product SKU to fulfill.
+        reward_product_name:
+          type:
+            - "string"
+            - "null"
+          description: >-
+            The catalog product name for a SKU award. Always null for a
+            points award.
         is_trigger_yearly:
           type: boolean
           description: >-
@@ -5074,12 +8114,42 @@ components:
             - "string"
             - "null"
           description: Subject line for fulfillment notification emails.
+        changelog:
+          type: array
+          description: Audit trail of changes made to the award after creation.
+          items:
+            type: object
+            properties:
+              changed_at:
+                type: string
+              changes:
+                type: object
+                description: Map of changed field name to {from, to} values.
         created_at:
           type: string
           description: Datetime the award was created.
         updated_at:
           type: string
           description: Datetime the award was last updated.
+    ServiceAwardDetail:
+      type: object
+      description: >-
+        A service award as returned by the single-award GET. Adds the lock
+        fields, which are only computed on this operation.
+      properties:
+        is_locked:
+          type: boolean
+          description: >-
+            True once the award has a completed fulfillment. When true,
+            reward_type, reward_value, is_trigger_yearly, interval,
+            issuance_time, and timezone can no longer be changed.
+        lock_reason:
+          type:
+            - "string"
+            - "null"
+          description: Explanation shown when is_locked is true, otherwise null.
+      allOf:
+        - $ref: '#/components/schemas/ServiceAward'
     ServiceAwardCreate:
       type: object
       required:
@@ -5147,7 +8217,11 @@ components:
       type: object
       description: >-
         All fields are optional. Only include the fields you wish to change.
-        Awards that have completed fulfillments cannot be modified.
+        reward_type and reward_value must be sent together; sending only one
+        of the two is a 400. Once the award has a completed fulfillment,
+        reward_type, reward_value, is_trigger_yearly, interval,
+        issuance_time, and timezone can no longer be changed. name, active,
+        and the email fields can still be changed at any time.
       properties:
         name:
           type: string
@@ -5190,7 +8264,6 @@ components:
           format: uuid
         participant_id:
           type: string
-          format: uuid
           description: The unique identifier of the participant.
         service_award_id:
           type: string
@@ -5229,6 +8302,10 @@ components:
         date:
           type: string
           format: date
+        anniversary_date:
+          type: string
+          format: date
+          description: The participant's milestone date, adjusted to the year this fulfillment is for.
         processed_at:
           type:
             - "string"
@@ -5244,11 +8321,39 @@ components:
           type: string
         reward_status:
           type: string
-          description: Current status of the fulfillment.
+          description: >-
+            Current status of the fulfillment. pending: not yet attempted.
+            retrying: the reward could not be issued and it will be tried
+            again. processed: the reward was issued. failed: the
+            fulfillment will not be retried.
           enum:
             - pending
+            - retrying
             - processed
             - failed
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+          description: Error message from the most recent failed reward attempt.
+        email_sent_at:
+          type:
+            - "string"
+            - "null"
+          description: Datetime the fulfillment email was sent.
+        email_retry_count:
+          type: integer
+          description: Number of times sending the fulfillment email has been retried.
+        email_skipped_at:
+          type:
+            - "string"
+            - "null"
+          description: Datetime the fulfillment email was skipped.
+        email_failed_at:
+          type:
+            - "string"
+            - "null"
+          description: Datetime the fulfillment email failed to send.
         created_at:
           type: string
         updated_at:
