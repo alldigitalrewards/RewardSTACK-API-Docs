@@ -21,8 +21,13 @@ info:
     - Reuse the cached token for every request until shortly before it expires,
       then generate a new one. A well-behaved client should be generating a new
       token at most once every hour or two.
-    - Do **not** generate a new token before every API call. Clients that
-      request a token per call will be rate limited.
+    - Do **not** generate a new token before every API call.
+
+    ## Failed logins
+
+    After 5 failed logins, `POST /token` answers `423 Locked` instead of
+    checking the credentials. The lock ends 15 minutes after the last failed
+    login. Check the API user and password before retrying.
 
     ## Response compatibility
 
@@ -38,9 +43,18 @@ info:
 
     ## Rate limiting
 
-    We do not currently enforce a general rate limit on API endpoints. The
-    exception is excessive token generation, as described in "Authentication
-    and token reuse" above.
+    We do not currently enforce a general rate limit on API endpoints. Failed
+    logins are limited as described in "Failed logins" above.
+
+    ## Errors
+
+    Each operation lists the error responses it returns. Error bodies are not
+    the same everywhere: depending on the operation, the body is a list of
+    messages, an object with `message`, an object with `message` and
+    `errors`, or, for service awards, an object with `error`. A `401` with
+    `{"message": "Forbidden"}` means the token's user cannot access the
+    organization or program in the URL. An unexpected error answers `500`
+    with `{"status": "error", "message": "Internal server error"}`.
   contact:
     email: technology@alldigitalrewards.com
 servers:
@@ -111,6 +125,15 @@ paths:
           schema:
             type: string
             maxLength: 255
+      requestBody:
+        required: false
+        description: >-
+          The same parameters can be sent in a JSON body instead of the query
+          string.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JwtRequest'
       responses:
         '201':
           description: JWT is returned
@@ -135,8 +158,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '423':
+          description: >-
+            Locked after 5 failed logins. The lock ends 15 minutes after the
+            last failed login.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageErrorsResponse'
+              example:
+                message: Locked
+                errors:
+                  - The resource that is being accessed is locked
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
+  /api/auth/tokens:
+    post:
+      tags:
+        - Token
+      summary: Generate a new JWT with an existing token
+      operationId: generateTokenWithToken
+      security:
+        - Bearer: [ ]
+      description: >-
+        Generates a new token for the same user as the token in the
+        `Authorization` header, without sending the API user and password
+        again. Takes the same parameters as `POST /token`, in the query string
+        or a JSON body.
+      parameters:
+        - name: hoursUntilExpiry
+          in: query
+          required: false
+          description: Number of hours until the token expires.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 8760
+            default: 2
+        - name: tokenName
+          in: query
+          required: false
+          description: Optional name for the token.
+          schema:
+            type: string
+            maxLength: 255
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JwtRequest'
+      responses:
+        '201':
+          description: JWT is returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JwtResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+    get:
+      tags:
+        - Token
+      summary: List generated tokens
+      operationId: listTokens
+      security:
+        - Bearer: [ ]
+      description: >-
+        Lists the tokens generated for the token's user, 30 per page. The
+        token values themselves are never returned.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number, starting at 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenReferenceList'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/tokens/invalidate:
+    post:
+      tags:
+        - Token
+      summary: Revoke a token
+      operationId: invalidateToken
+      security:
+        - Bearer: [ ]
+      description: >-
+        Revokes a token before it expires. Use the `jti` from `GET
+        /api/auth/tokens`. A revoked token can no longer be used.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - jti
+              properties:
+                jti:
+                  type: string
+                  description: The token id (`jti`) from `GET /api/auth/tokens`.
+      responses:
+        '200':
+          description: Token revoked. The response has no body.
+        '400':
+          description: No `jti` was sent.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - You must provide a valid JTI to invalidate a JWT token.
+        '404':
+          description: No token with this `jti` was found for the token's user.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization:
     get:
       tags:
@@ -145,7 +311,11 @@ paths:
       operationId: getOrganizationList
       security:
         - Bearer: [ ]
-      description: Returns organization collection.
+      description: >-
+        Returns organization collection. List rows are shorter than a single
+        organization: `industry_program` and `updated_at` are always null and
+        `domains` is not returned. Use `GET /api/organization/{uniqueId}` for
+        those fields.
       parameters:
         - name: parent
           in: query
@@ -170,10 +340,28 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Set the number of desired results per page.
+          description: >-
+            Set the number of desired results per page. Values above 500 are
+            treated as 500.
           schema:
             type: integer
+            minimum: 1
             default: 30
+        - name: orderBy[field]
+          in: query
+          required: false
+          description: >-
+            Sort the list by this organization field, for example `name` or
+            `unique_id`. Send together with `orderBy[direction]`.
+          schema:
+            type: string
+        - name: orderBy[direction]
+          in: query
+          required: false
+          description: Sort direction. Send together with `orderBy[field]`.
+          schema:
+            type: string
+            enum: [asc, desc]
       responses:
         '200':
           description: successful operation
@@ -183,6 +371,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/OrganizationList'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     post:
@@ -217,6 +407,8 @@ paths:
                     type: string
                   errors:
                     type: object
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/organization/{uniqueId}:
@@ -242,8 +434,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Organization not found
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags:
         - Organization
@@ -251,6 +447,11 @@ paths:
       operationId: updateOrganization
       security:
         - Bearer: [ ]
+      description: >-
+        Not a partial update: the body is checked like a create, so `name`,
+        `unique_id` and `parent` must be sent every time, even though
+        `unique_id` and `parent` cannot change. A body with only the fields to
+        change fails with 400.
       parameters:
         - name: uniqueId
           in: path
@@ -263,7 +464,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/OrganizationUpdate'
-        description: Organization properties to update. Only include fields you wish to change.
+        description: >-
+          The full organization: `name`, `unique_id` and `parent` are required
+          on every update.
         required: true
       responses:
         '200':
@@ -283,8 +486,75 @@ paths:
                     type: string
                   errors:
                     type: object
+              example:
+                message: Validation Failed
+                errors:
+                  unique_id:
+                    Required::NON_EXISTENT_KEY: unique_id must be provided, but does not exist
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
+  /api/organization/{uniqueId}/domain:
+    get:
+      tags:
+        - Organization
+      summary: List an organization's domains
+      operationId: getOrganizationDomains
+      security:
+        - Bearer: [ ]
+      description: Returns the domains of an organization.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The organization unique_id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrganizationDomain'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/organization/{uniqueId}/balance:
+    get:
+      tags:
+        - Organization
+      summary: Get an organization's funding balance
+      operationId: getOrganizationFundingBalance
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns the organization's available funding balance. The value can be
+        up to 2 minutes old.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The organization unique_id.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationBalance'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks:
     get:
       tags:
@@ -310,8 +580,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/WebhookRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Organization not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags:
         - Organization > Webhook
@@ -334,6 +608,18 @@ paths:
           description: successful operation
         '400':
           description: Invalid properties sent.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Active must be true or false.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}:
     get:
       tags:
@@ -363,8 +649,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebhookRead'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Webhook not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags:
         - Organization > Webhook
@@ -393,8 +683,48 @@ paths:
           description: successful operation
         '400':
           description: Invalid properties sent or webhook is immutable.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Webhook not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags:
+        - Organization > Webhook
+      operationId: deleteWebhook
+      security:
+        - Bearer: [ ]
+      summary: Delete a webhook
+      description: Deletes a webhook.
+      parameters:
+        - name: orgId
+          in: path
+          required: true
+          description: The organization unique_id.
+          schema:
+            type: string
+        - name: webhookId
+          in: path
+          required: true
+          description: Webhook ID.
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Webhook deleted.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Webhook not found, or it belongs to another organization.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}/logs:
     get:
       tags:
@@ -424,7 +754,9 @@ paths:
         - name: status_code
           in: query
           required: false
-          description: The HTTP Status code of the last response of any given webhook log.
+          description: >-
+            The HTTP Status code of the last response of any given webhook log.
+            When sent, `last_id` is ignored.
           schema:
             type: integer
         - name: last_id
@@ -432,16 +764,23 @@ paths:
           required: false
           description: >-
             The MongoDB ObjectId of the last Webhook Log read. The response
-            will start with the next Webhook Log in line.
+            will start with the next Webhook Log in line. Ignored when
+            `status_code` is also sent.
           schema:
             type: string
       responses:
         '200':
-          description: successful operation
+          description: successful operation. The body is a list of webhook logs.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/WebhookLogs'
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookLog'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}:
     get:
       tags:
@@ -477,8 +816,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebhookLog'
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: Webhook log not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/organization/{orgId}/webhooks/{webhookId}/logs/{webhookLogId}/replay:
     post:
       tags:
@@ -488,9 +831,12 @@ paths:
         - Bearer: [ ]
       summary: Replay Webhook Log
       description: >-
-        Replays the Webhook. This repeats the stored request exactly
-        as you see it in the viewWebhookLog call. This will store the response and
-        return the HTTP Status code the server gave when replaying the webhook.
+        Replays the Webhook. The stored request body and headers from the
+        viewWebhookLog call are sent to the webhook's current URL. If the
+        webhook's URL has changed since the log was written, the replay goes to
+        the new URL, not the one the original request went to. This will store
+        the response and return the HTTP Status code the server gave when
+        replaying the webhook.
       parameters:
         - name: orgId
           in: path
@@ -2741,6 +3087,25 @@ components:
             $ref: '#/components/schemas/UserWrite'
       description: Participant object.
       required: true
+  responses:
+    Forbidden:
+      description: >-
+        The token's user cannot access the organization or program in the URL.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          example:
+            message: Forbidden
+    InternalError:
+      description: Unexpected error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalErrorResponse'
+          example:
+            status: error
+            message: Internal server error
   securitySchemes:
     BasicAuth:
       type: http
@@ -2758,8 +3123,8 @@ components:
     JwtRequest:
       type: object
       description: >-
-        Token generation parameters. These are passed as query parameters, not in
-        the JSON body.
+        Token generation parameters. Send them as query parameters or in a JSON
+        body.
       properties:
         hoursUntilExpiry:
           type: integer
@@ -2785,6 +3150,88 @@ components:
       properties:
         message:
           type: string
+    MessageErrorsResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: string
+    InternalErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+    TokenReference:
+      type: object
+      description: A generated token. The token value itself is never returned.
+      properties:
+        jti:
+          type: string
+          description: The token id. Use it to revoke the token.
+        createdAt:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        expiresAt:
+          type: string
+          description: Expiry timestamp (Y-m-d H:i:s).
+        invalidatedAt:
+          type:
+            - "string"
+            - "null"
+          description: When the token was revoked (Y-m-d H:i:s), or null.
+        usageCount:
+          type: integer
+          description: How many requests used this token.
+        userId:
+          type: integer
+          description: The id of the user the token belongs to.
+        tokenName:
+          type:
+            - "string"
+            - "null"
+          description: The name given when the token was generated.
+        emailAddress:
+          type: string
+          description: The email address of the user the token belongs to.
+    TokenReferenceList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TokenReference'
+        page:
+          type: integer
+          description: The current page.
+        pageSize:
+          type: integer
+          description: Tokens per page (30).
+        totalCount:
+          type: integer
+          description: Total number of tokens.
+        totalPageCount:
+          type: integer
+          description: Total number of pages.
+      example:
+        data:
+          - jti: 3f6c1d2e-8a4b-4c7d-9e1f-2a3b4c5d6e7f
+            createdAt: '2026-01-15 14:05:00'
+            expiresAt: '2026-01-15 16:05:00'
+            invalidatedAt: null
+            usageCount: 12
+            userId: 42
+            tokenName: null
+            emailAddress: api-user@example.com
+        page: 1
+        pageSize: 30
+        totalCount: 1
+        totalPageCount: 1
     UserList:
       type: object
       description: >-
@@ -3560,7 +4007,10 @@ components:
           type: integer
     OrganizationList:
       type: object
-      description: Organization object as returned in list responses.
+      description: >-
+        Organization object as returned in list responses. `industry_program`
+        and `updated_at` are always null here and `domains` is not returned;
+        read a single organization for them.
       properties:
         unique_id:
           type: string
@@ -3574,7 +4024,12 @@ components:
           minLength: 2
           maxLength: 50
         industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
+          type:
+            - "integer"
+            - "null"
+          description: >-
+            Not filled in list responses: always null. Read a single
+            organization for the value.
         program_count:
           description: The number of programs configured under this organization.
           type: integer
@@ -3587,17 +4042,16 @@ components:
             - "string"
             - "null"
           description: Parent organization unique_id.
-        domains:
-          type: array
-          description: Domain URLs associated with this organization.
-          items:
-            type: string
         created_at:
           type: string
-          description: Creation timestamp (Y-m-d H:i:s).
+          description: Timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: >-
+            Not filled in list responses: always null. Read a single
+            organization for the value.
     OrganizationRead:
       type: object
       description: Full organization object.
@@ -3684,9 +4138,20 @@ components:
     OrganizationUpdate:
       type: object
       description: >-
-        Organization update request body. Only include fields you wish to change.
-        unique_id and parent cannot be changed on update (they will be silently ignored).
+        Organization update request body. This is not a partial update: send
+        `name`, `unique_id` and `parent` every time, as on create. `unique_id`
+        and `parent` cannot be changed on update; send their current values.
+      required:
+        - unique_id
+        - name
+        - parent
       properties:
+        unique_id:
+          type: string
+          description: The organization's current unique_id. It cannot be changed.
+        parent:
+          type: string
+          description: The organization's current parent unique_id. It cannot be changed.
         name:
           type: string
           description: The name of the organization.
@@ -3695,8 +4160,9 @@ components:
         domains:
           type: array
           description: >-
-            Replaces all existing domains. Each must be a valid domain URL and
-            unique across all organizations.
+            Domains to add. They are added to the organization's existing
+            domains; domains already on the organization are not removed. Each
+            must be a valid domain URL and unique across all organizations.
           items:
             type: string
         industry_program:
@@ -3750,9 +4216,14 @@ components:
             - "null"
           description: Password for basic authentication.
         active:
-          type: integer
-          description: Is this webhook active? 0 = false, 1 = true.
-          enum: [0, 1]
+          type:
+            - "integer"
+            - "boolean"
+          description: >-
+            Is this webhook active? 1 or true = active, 0 or false = inactive.
+            When left out, the webhook is active.
+          enum: [0, 1, true, false]
+          default: 1
         immutable:
           type: integer
           description: Can this webhook be modified? 0 = mutable, 1 = immutable.
@@ -3788,13 +4259,11 @@ components:
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
-    WebhookLogs:
-      type: object
-      properties:
-        webhookLogs:
-          type: array
-          items:
-            $ref: '#/components/schemas/WebhookLog'
+        updated_at:
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), or null.
     WebhookLog:
       type: object
       properties:
@@ -4326,27 +4795,84 @@ components:
         - CN
     Contact:
       type: object
-      description: Contact information (read response).
+      description: Contact information (read response). Fields not set are null.
       properties:
         firstname:
-          type: string
+          type:
+            - "string"
+            - "null"
         lastname:
-          type: string
+          type:
+            - "string"
+            - "null"
         phone:
-          type: string
+          type:
+            - "string"
+            - "null"
         email:
-          type: string
+          type:
+            - "string"
+            - "null"
         address1:
-          type: string
+          type:
+            - "string"
+            - "null"
         address2:
-          type: string
+          type:
+            - "string"
+            - "null"
         city:
-          type: string
+          type:
+            - "string"
+            - "null"
         state:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: State abbreviation (e.g. NY).
         zip:
+          type:
+            - "string"
+            - "null"
+    OrganizationBalance:
+      type: object
+      properties:
+        balance:
           type: string
+          description: The available balance for the organization, as a decimal string.
+      example:
+        balance: '1250.00'
+    OrganizationDomain:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Domain id.
+        organization_id:
+          type: integer
+          description: Internal id of the organization.
+        url:
+          type: string
+          description: The domain.
+        active:
+          type: integer
+          description: 1 for active, 0 for inactive.
+          enum: [0, 1]
+        created_at:
+          type: string
+          description: Creation timestamp (Y-m-d H:i:s).
+        updated_at:
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), or null.
+      example:
+        id: 12
+        organization_id: 34
+        url: rewards.example.com
+        active: 1
+        created_at: '2026-01-15 14:05:00'
+        updated_at: null
     ContactWrite:
       type: object
       description: Contact information for create/update requests.
