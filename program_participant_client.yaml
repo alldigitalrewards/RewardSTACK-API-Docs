@@ -18,7 +18,7 @@ info:
     ## Timeouts
     Every request has a 10-second connect timeout and a 10-second response timeout,
     and is sent once, with no retry.
-  version: 1.0.0
+  version: 1.1.0
   contact:
     name: All Digital Rewards
     email: support@alldigitalrewards.com
