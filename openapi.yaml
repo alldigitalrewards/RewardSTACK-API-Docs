@@ -92,7 +92,11 @@ tags:
       Manage service awards for a program. Service awards allow you to
       automatically issue rewards (points or products) to participants based on
       milestone dates such as hire anniversaries. Awards can be configured to
-      trigger yearly or at a custom interval.
+      trigger yearly or at a custom interval. Most error bodies use an
+      error field. The 401 and the 404 for a missing program use status
+      and message instead: when the program in the URL does not exist,
+      every service award operation answers 404 with
+      {"status": "error", "message": "Program not found or invalid program ID"}.
   - name: Milestone
     description: Operations for milestone management and review.
   - name: Milestone > Activity
@@ -3017,14 +3021,17 @@ paths:
           description: Set the number of desired results per page.
           schema:
             type: integer
-            default: 30
+            default: 25
         - name: filters[active]
           in: query
           required: false
-          description: Filter by active status (0 or 1).
+          description: >-
+            Filter by active status. Only the exact string "true" matches
+            active awards. Any other value, including the number 1, matches
+            inactive awards. Send true or false.
           schema:
-            type: integer
-            enum: [0, 1]
+            type: string
+          example: "true"
         - name: filters[reward_type]
           in: query
           required: false
@@ -3032,6 +3039,25 @@ paths:
           schema:
             type: integer
             enum: [1, 2]
+        - name: filters[name]
+          in: query
+          required: false
+          description: Filter by award name, partial match.
+          schema:
+            type: string
+        - name: filters[awardId]
+          in: query
+          required: false
+          description: Filter by the award's unique identifier, exact match.
+          schema:
+            type: string
+            format: uuid
+        - name: filters[is_trigger_yearly]
+          in: query
+          required: false
+          description: Filter by whether the award triggers yearly.
+          schema:
+            type: boolean
       responses:
         '200':
           description: successful operation
@@ -3044,12 +3070,32 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/ServiceAward'
+                  current_page:
+                    type: integer
+                    description: The current page number.
+                  page_size:
+                    type: integer
+                    description: Number of results per page.
+                  total_count:
+                    type: integer
+                    description: Total number of awards counted for the list.
+                  total_page_count:
+                    type: integer
+                    description: Total number of pages available.
         '400':
           description: Missing or invalid program identifier
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while fetching the awards.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     post:
@@ -3088,7 +3134,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while creating the service award.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
   /api/program/{programId}/service-award/{serviceAwardId}:
@@ -3121,13 +3175,21 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ServiceAward'
+                $ref: '#/components/schemas/ServiceAwardDetail'
         '404':
           description: Service award not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while fetching the award.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     put:
@@ -3138,8 +3200,12 @@ paths:
       security:
         - Bearer: [ ]
       description: >-
-        Update an existing service award. Awards that have already issued
-        fulfillments cannot be modified.
+        Update an existing service award. Only include the fields you wish
+        to change. reward_type and reward_value must be sent together. Once
+        the award has a completed fulfillment, reward_type, reward_value,
+        is_trigger_yearly, interval, issuance_time, and timezone can no
+        longer be changed; name, active, and the email fields can still be
+        changed at any time.
       parameters:
         - name: programId
           in: path
@@ -3169,23 +3235,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceAward'
         '400':
-          description: Validation error
+          description: >-
+            Validation error, including sending only one of reward_type and
+            reward_value.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
         '404':
           description: Service award not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
         '422':
-          description: Award cannot be modified because it has completed fulfillments
+          description: >-
+            The award has a completed fulfillment and the request would
+            change reward_type, reward_value, is_trigger_yearly, interval,
+            issuance_time, or timezone. Other fields can still be changed.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+              example:
+                error: >-
+                  This award has completed fulfillments; its reward and
+                  schedule cannot be modified.
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: An error occurred while updating the service award.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     delete:
@@ -3195,7 +3278,10 @@ paths:
       operationId: deleteServiceAward
       security:
         - Bearer: [ ]
-      description: Delete a service award and its associated participant data.
+      description: >-
+        Delete a service award. The award is removed. Any of its
+        fulfillments that have not yet been processed are marked failed.
+        Participant enrollment records for the award are not removed.
       parameters:
         - name: programId
           in: path
@@ -3219,7 +3305,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: Deletion failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
   /api/program/{programId}/service-award/{serviceAwardId}/participant:
@@ -3260,14 +3354,27 @@ paths:
           description: Set the number of desired results per page.
           schema:
             type: integer
-            default: 30
+            default: 25
         - name: filters[participant_id]
           in: query
           required: false
           description: Filter results by a specific participant unique identifier.
           schema:
             type: string
-            format: uuid
+        - name: name
+          in: query
+          required: false
+          description: >-
+            Filter by participant name, partial match on first name, last
+            name, or full name.
+          schema:
+            type: string
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by participant unique identifier, prefix match.
+          schema:
+            type: string
       responses:
         '200':
           description: successful operation
@@ -3285,7 +3392,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                $ref: '#/components/schemas/ServiceAwardError'
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: Failed to retrieve participant data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
     post:
@@ -3344,11 +3459,50 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceAwardBulkResponse'
         '400':
-          description: Validation error (e.g. missing required fields or invalid date format)
+          description: >-
+            Validation error (e.g. missing required fields or invalid date
+            format). If every participant in the request fails, the
+            response adds a summary and the per-participant errors instead
+            of a plain error message.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse'
+                anyOf:
+                  - $ref: '#/components/schemas/ServiceAwardError'
+                  - type: object
+                    description: Returned when every participant in the request failed.
+                    properties:
+                      error:
+                        type: string
+                      summary:
+                        type: object
+                        properties:
+                          total_participants:
+                            type: integer
+                          successful:
+                            type: integer
+                          failed:
+                            type: integer
+                      errors:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            participant_id:
+                              type: string
+                            error_type:
+                              type: string
+                              enum:
+                                - validation_error
+                                - email_processing_error
+        '401':
+          $ref: '#/components/responses/ServiceAwardUnauthorized'
+        '500':
+          description: Bulk upsert operation failed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceAwardError'
         default:
           description: Unknown exception
   /api/program/{programId}/milestone:
@@ -3968,6 +4122,15 @@ components:
           example:
             status: error
             message: Internal server error
+    ServiceAwardUnauthorized:
+      description: Missing, invalid, or expired bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalErrorResponse'
+          example:
+            status: error
+            message: Token not found.
   securitySchemes:
     BasicAuth:
       type: http
@@ -5036,7 +5199,14 @@ components:
           items:
             type: string
         industry_program:
-          $ref: '#/components/schemas/IndustryProgramEnum'
+          type:
+            - "integer"
+            - "null"
+          description: >-
+            Industry program types: 1 = Health_Wellness, 2 = Channel_Sales,
+            3 = Employee_Recognition, 4 = Consumer, 5 = Market_Research,
+            6 = Loyalty_Marketing, 7 = Rebates. Null until set.
+          enum: [1, 2, 3, 4, 5, 6, 7, null]
         active:
           type: integer
           description: 1 for active, 0 for inactive.
@@ -6700,6 +6870,12 @@ components:
           type: number
           format: float
           description: Updated completion percentage for the milestone
+    ServiceAwardError:
+      type: object
+      description: The error body returned by service award operations.
+      properties:
+        error:
+          type: string
     ServiceAward:
       type: object
       description: A service award configured for a program.
@@ -6709,7 +6885,7 @@ components:
           format: uuid
         program_uuid:
           type: string
-          format: uuid
+          description: The program's unique_id.
         name:
           type: string
           description: Display name of the service award.
@@ -6722,6 +6898,13 @@ components:
           description: >-
             The reward amount. For points this is the number of points to issue.
             For SKU this is the product SKU to fulfill.
+        reward_product_name:
+          type:
+            - "string"
+            - "null"
+          description: >-
+            The catalog product name for a SKU award. Always null for a
+            points award.
         is_trigger_yearly:
           type: boolean
           description: >-
@@ -6777,12 +6960,42 @@ components:
             - "string"
             - "null"
           description: Subject line for fulfillment notification emails.
+        changelog:
+          type: array
+          description: Audit trail of changes made to the award after creation.
+          items:
+            type: object
+            properties:
+              changed_at:
+                type: string
+              changes:
+                type: object
+                description: Map of changed field name to {from, to} values.
         created_at:
           type: string
           description: Datetime the award was created.
         updated_at:
           type: string
           description: Datetime the award was last updated.
+    ServiceAwardDetail:
+      type: object
+      description: >-
+        A service award as returned by the single-award GET. Adds the lock
+        fields, which are only computed on this operation.
+      properties:
+        is_locked:
+          type: boolean
+          description: >-
+            True once the award has a completed fulfillment. When true,
+            reward_type, reward_value, is_trigger_yearly, interval,
+            issuance_time, and timezone can no longer be changed.
+        lock_reason:
+          type:
+            - "string"
+            - "null"
+          description: Explanation shown when is_locked is true, otherwise null.
+      allOf:
+        - $ref: '#/components/schemas/ServiceAward'
     ServiceAwardCreate:
       type: object
       required:
@@ -6850,7 +7063,11 @@ components:
       type: object
       description: >-
         All fields are optional. Only include the fields you wish to change.
-        Awards that have completed fulfillments cannot be modified.
+        reward_type and reward_value must be sent together; sending only one
+        of the two is a 400. Once the award has a completed fulfillment,
+        reward_type, reward_value, is_trigger_yearly, interval,
+        issuance_time, and timezone can no longer be changed. name, active,
+        and the email fields can still be changed at any time.
       properties:
         name:
           type: string
@@ -6893,7 +7110,6 @@ components:
           format: uuid
         participant_id:
           type: string
-          format: uuid
           description: The unique identifier of the participant.
         service_award_id:
           type: string
@@ -6932,6 +7148,10 @@ components:
         date:
           type: string
           format: date
+        anniversary_date:
+          type: string
+          format: date
+          description: The participant's milestone date, adjusted to the year this fulfillment is for.
         processed_at:
           type:
             - "string"
@@ -6947,11 +7167,39 @@ components:
           type: string
         reward_status:
           type: string
-          description: Current status of the fulfillment.
+          description: >-
+            Current status of the fulfillment. pending: not yet attempted.
+            retrying: the reward could not be issued and it will be tried
+            again. processed: the reward was issued. failed: the
+            fulfillment will not be retried.
           enum:
             - pending
+            - retrying
             - processed
             - failed
+        failure_reason:
+          type:
+            - "string"
+            - "null"
+          description: Error message from the most recent failed reward attempt.
+        email_sent_at:
+          type:
+            - "string"
+            - "null"
+          description: Datetime the fulfillment email was sent.
+        email_retry_count:
+          type: integer
+          description: Number of times sending the fulfillment email has been retried.
+        email_skipped_at:
+          type:
+            - "string"
+            - "null"
+          description: Datetime the fulfillment email was skipped.
+        email_failed_at:
+          type:
+            - "string"
+            - "null"
+          description: Datetime the fulfillment email failed to send.
         created_at:
           type: string
         updated_at:
