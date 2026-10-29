@@ -905,6 +905,26 @@ paths:
           description: Filter by full domain URL (subdomain.domain).
           schema:
             type: string
+        - name: organization_id
+          in: query
+          required: false
+          description: Filter by the organization's internal numeric id.
+          schema:
+            type: integer
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by one or more program unique_id values.
+          schema:
+            type: array
+            items:
+              type: string
+        - name: program_type
+          in: query
+          required: false
+          description: Filter by program type name.
+          schema:
+            type: string
         - name: page
           in: query
           required: false
@@ -929,6 +949,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ProgramList'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     post:
@@ -953,7 +975,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
         '400':
-          description: Validation error
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                type: array
+                description: A list of one or more validation error messages.
+                items:
+                  type: string
+              example:
+                - Organization must not be empty
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{uniqueId}:
@@ -985,8 +1018,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Program not found
+          description: Program not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: This resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     put:
@@ -996,6 +1047,10 @@ paths:
       operationId: updateProgram
       security:
         - Bearer: [ ]
+      description: >-
+        Update program properties. `point` (the point-to-USD ratio) cannot be
+        changed after the program is created; sending the same value the
+        program already has is fine, sending a different value fails with 400.
       parameters:
         - name: uniqueId
           in: path
@@ -1018,7 +1073,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProgramRead'
         '400':
-          description: Validation error
+          description: >-
+            Validation error, including a malformed uniqueId path value or an
+            attempt to change point after creation.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    description: A list of one or more validation error messages.
+                    items:
+                      type: string
+                    example:
+                      - The point ratio cannot be changed after the program has been created.
+                  - $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{uniqueId}/metrics:
@@ -1044,6 +1118,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProgramMetrics'
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          description: Unknown exception
+  /api/program/{uniqueId}/publish/{publish}:
+    put:
+      tags:
+        - Program
+      summary: Set a program's published flag.
+      operationId: updateProgramPublish
+      security:
+        - Bearer: [ ]
+      description: Sets Program.published to the given value.
+      parameters:
+        - name: uniqueId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: publish
+          in: path
+          required: true
+          description: 1 to publish, 0 to unpublish.
+          schema:
+            type: integer
+            enum: [0, 1]
+      responses:
+        '204':
+          description: Published flag updated.
+        '400':
+          description: >-
+            The uniqueId path value is malformed, or the update could not be
+            applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid program ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Program not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: This resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant:
@@ -1111,6 +1247,18 @@ paths:
           description: Filter by meta data value (use with metaKey).
           schema:
             type: string
+        - name: exclude_unique_id
+          in: query
+          required: false
+          description: Exclude a single participant unique_id from the results.
+          schema:
+            type: string
+        - name: id_verification_status
+          in: query
+          required: false
+          description: Filter by identity verification status.
+          schema:
+            type: string
         - name: page
           in: query
           required: false
@@ -1136,6 +1284,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/UserList'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     post:
@@ -1162,7 +1316,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
         '400':
-          description: Validation error
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    description: >-
+                      An object keyed by field name when the body fails
+                      validation. Absent for some rejections (for example
+                      setting status to DATADEL on create).
+              example:
+                message: Validation Failed
+                errors:
+                  status:
+                    Match::DOES_NOT_MATCH: >-
+                      The status is not valid, please refer to docs for
+                      acceptable types.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/list:
@@ -1201,6 +1380,20 @@ paths:
                   $ref: '#/components/schemas/UserList'
         '400':
           description: participant_id collection must be provided.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Participant ID collection must be provided in post request body.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
   /api/program/{programId}/participant/{uniqueId}:
@@ -1232,8 +1425,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Resource does not exist.
+          description: >-
+            Resource does not exist. No response body when the program itself
+            does not exist; a message body when the program exists but the
+            participant does not.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Resource does not exist
+        '500':
+          $ref: '#/components/responses/InternalError'
     put:
       tags:
         - Participant
@@ -1243,7 +1457,10 @@ paths:
         - Bearer: [ ]
       description: >-
         Update participant properties. Cannot modify unique_id, program, organization, or credit.
-        Meta data is completely replaced (PUT semantics). Use PATCH on the /meta endpoint to merge instead.
+        Meta data sent here is merged into existing meta (upsert): keys omitted
+        from the request are left unchanged, not deleted. For a true full
+        replace that deletes omitted keys, use PUT on the dedicated /meta
+        endpoint instead. PATCH on this same path behaves identically to PUT.
       parameters:
         - name: programId
           in: path
@@ -1267,7 +1484,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/ParticipantRead'
         '400':
-          description: Validation error
+          description: Validation error, including a malformed uniqueId path value.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    description: An object keyed by field name when the body fails validation.
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          description: Unknown exception
+    patch:
+      tags:
+        - Participant
+      summary: Update a participant (alias of PUT).
+      operationId: patchUser
+      security:
+        - Bearer: [ ]
+      description: >-
+        Identical to PUT on this same path, including the meta-merge
+        behavior: existing meta keys omitted from the request are left
+        unchanged, not deleted.
+      parameters:
+        - name: programId
+          in: path
+          required: true
+          description: The Program unique_id.
+          schema:
+            type: string
+        - name: uniqueId
+          in: path
+          required: true
+          description: Unique ID of participant to update.
+          schema:
+            type: string
+      requestBody:
+        $ref: '#/components/requestBodies/UserWrite'
+      responses:
+        '200':
+          description: Participant updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParticipantRead'
+        '400':
+          description: Validation error, including a malformed uniqueId path value.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  errors:
+                    description: An object keyed by field name when the body fails validation.
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     delete:
@@ -1297,8 +1585,28 @@ paths:
       responses:
         '204':
           description: Participant PII removed.
+        '400':
+          description: The uniqueId path value is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Invalid participant ID
+        '401':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Participant not found.
+          description: >-
+            Participant not found. No response body when the program itself
+            does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+              example:
+                message: Participant not valid
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/transaction:
     get:
       tags:
@@ -1864,13 +2172,30 @@ paths:
                 $ref: '#/components/schemas/ParticipantSSO'
         '400':
           description: Resource does not exist or participant not active.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - Resource does not exist
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
         default:
           description: Unknown exception
     get:
       tags:
         - Participant > SSO
       summary: Validate a participant SSO token
-      description: Returns a participant object if the SSO token is valid.
+      description: >-
+        Returns a participant object if the SSO token is valid. The token is
+        single-use: it is consumed on the first successful validation, and a
+        second call with the same token fails with 400.
       operationId: validateSSOToken
       security:
         - Bearer: [ ]
@@ -1902,6 +2227,20 @@ paths:
                 $ref: '#/components/schemas/ParticipantRead'
         '400':
           description: Resource does not exist or no token match.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+              example:
+                - No token match
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/participant/{uniqueId}/meta:
     put:
       tags:
@@ -1930,9 +2269,21 @@ paths:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '200':
-          description: successful operation
+          description: successful operation. The response body is a literal empty array ([]).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {}
+              example: []
         '400':
           description: Invalid meta format or resource does not exist.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
     patch:
       tags:
         - Participant
@@ -1960,9 +2311,118 @@ paths:
         $ref: '#/components/requestBodies/MetaArray'
       responses:
         '200':
-          description: successful operation
+          description: successful operation. The response body is a literal empty array ([]).
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {}
+              example: []
         '400':
           description: Invalid meta format or resource does not exist.
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No response body when the program itself does not exist.
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/participant/search:
+    get:
+      tags:
+        - Participant
+      summary: Search participants across every program the caller can access.
+      operationId: searchParticipants
+      security:
+        - Bearer: [ ]
+      description: >-
+        Returns participants across all programs the token's user can
+        access, instead of a single program. Returns an empty list when the
+        user has no program access.
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: Filter by first/last name or combined name (substring search).
+          schema:
+            type: string
+        - name: email_address
+          in: query
+          required: false
+          description: Filter by email address (substring search).
+          schema:
+            type: string
+        - name: unique_id
+          in: query
+          required: false
+          description: Filter by participant unique_id (prefix search).
+          schema:
+            type: string
+        - name: active
+          in: query
+          required: false
+          description: Filter by active status (0 or 1).
+          schema:
+            type: integer
+            enum: [0, 1]
+        - name: status
+          in: query
+          required: false
+          description: Filter by participant status.
+          schema:
+            $ref: '#/components/schemas/UserStatusEnum'
+        - name: points_greater_than
+          in: query
+          required: false
+          description: Filter by minimum credit balance.
+          schema:
+            type: number
+        - name: metaKey
+          in: query
+          required: false
+          description: Filter by meta data key name (use with metaValue).
+          schema:
+            type: string
+        - name: metaValue
+          in: query
+          required: false
+          description: Filter by meta data value (use with metaKey).
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Request a specific page number starting with page 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          description: >-
+            Set the number of desired results per page. Values above 500 are
+            treated as 500.
+          schema:
+            type: integer
+            minimum: 1
+            default: 30
+      responses:
+        '200':
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserList'
+        '400':
+          description: An invalid filter value was provided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/program/{programId}/catalog:
     get:
       tags:
@@ -3248,11 +3708,15 @@ components:
           type: string
           description: Participant email address.
         credit:
-          type: number
-          description: The participant's earned (non-shareable) point balance.
+          type: string
+          description: >-
+            The participant's earned (non-shareable) point balance. Returned
+            as a quoted decimal string (for example "0.00"), not a JSON number.
         shared_credit:
-          type: number
-          description: The participant's shareable point balance.
+          type: string
+          description: >-
+            The participant's shareable point balance. Returned as a quoted
+            decimal string (for example "0.00"), not a JSON number.
         firstname:
           type: string
           description: Participant first name.
@@ -3262,7 +3726,9 @@ components:
           description: Participant last name.
           maxLength: 50
         phone:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Participant phone number.
         active:
           type: integer
@@ -3271,19 +3737,27 @@ components:
         status:
           $ref: '#/components/schemas/UserStatusEnum'
         language:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Language preference.
           default: en
         transactions_disabled:
-          type: integer
-          description: Whether transactions are disabled for this participant. 0 = enabled, 1 = disabled.
-          enum: [0, 1]
+          type: boolean
+          description: Whether transactions are disabled for this participant.
+        id_verified:
+          type:
+            - "integer"
+            - "null"
+          description: Identity verification result. Null when not yet reviewed.
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), null if never updated.
         deactivated_at:
           type:
             - "string"
@@ -3369,14 +3843,17 @@ components:
           type: string
           description: Participant email address.
         credit:
-          type: number
-          description: The participant's earned (non-shareable) point balance.
+          type: string
+          description: >-
+            The participant's earned (non-shareable) point balance. Returned
+            as a quoted decimal string (for example "0.00"), not a JSON number.
         shared_credit:
-          type: number
+          type: string
           description: >-
             The participant's shareable point balance. These points can be
             shared with other participants in the same program when point
-            sharing is enabled.
+            sharing is enabled. Returned as a quoted decimal string (for
+            example "0.00"), not a JSON number.
         firstname:
           type: string
           description: Participant first name.
@@ -3384,10 +3861,14 @@ components:
           type: string
           description: Participant last name.
         phone:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Participant phone number.
         birthdate:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Participant birthdate (YYYY-MM-DD).
         active:
           type: integer
@@ -3399,22 +3880,36 @@ components:
           type: string
           description: Language preference.
         transactions_disabled:
-          type: integer
-          description: Whether transactions are disabled. 0 = enabled, 1 = disabled.
-          enum: [0, 1]
+          type: boolean
+          description: Whether transactions are disabled.
+        id_verified:
+          type:
+            - "integer"
+            - "null"
+          description: Identity verification result. Null when not yet reviewed.
+        password_updated_at:
+          type:
+            - "string"
+            - "null"
+          description: Timestamp the password was last changed (Y-m-d H:i:s), null if never set.
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), null if never updated.
         deactivated_at:
           type:
             - "string"
             - "null"
           description: Deactivation timestamp, null if active.
         address:
-          $ref: '#/components/schemas/Address'
+          oneOf:
+            - $ref: '#/components/schemas/Address'
+            - type: 'null'
+          description: Null when no address has been set.
         program:
           type: string
           description: The assigned program unique_id.
@@ -3425,15 +3920,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Meta'
+        share_usage:
+          type: object
+          description: Present only when the participant's program has point sharing enabled.
+          properties:
+            daily_shared:
+              type: number
+              description: Amount shared by this participant so far today.
+            weekly_shared:
+              type: number
+              description: Amount shared by this participant so far this week.
+            monthly_shared:
+              type: number
+              description: Amount shared by this participant so far this month.
+            total_shared:
+              type: number
+              description: Lifetime amount shared by this participant.
     ParticipantSSO:
       type: object
+      description: >-
+        Returned on successful SSO token generation. There is no `redirect`
+        field: a decoded `redirect` query parameter is appended as part of the
+        `exchange` URL instead.
       properties:
         token:
           type: string
           description: The SSO token.
-        redirect:
+        participant:
           type: string
-          description: The redirect URL, present if redirect parameter was provided.
+          description: The participant's unique_id.
+        domain:
+          type: string
+          description: The bare marketplace domain (for example mydigitalrewards.com).
+        exchange:
+          type: string
+          description: >-
+            The full marketplace URL to redirect the participant's browser to,
+            including the authenticate token and, if a redirect parameter was
+            provided, the decoded redirect path.
     ProgramList:
       type: object
       description: Program object as returned in list responses.
@@ -3487,10 +4011,14 @@ components:
             America/Adak, Pacific/Honolulu.
           default: America/Phoenix
         start_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program start date (YYYY-MM-DD).
         end_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program end date (YYYY-MM-DD HH:MM:SS).
         created_at:
           type: string
@@ -3501,9 +4029,6 @@ components:
         organization:
           type: string
           description: Organization unique_id.
-        status:
-          type: string
-          description: Program status derived from active field.
         meta:
           type:
             - "array"
@@ -3543,8 +4068,12 @@ components:
           description: The point-to-USD ratio. e.g. 1 means 1 point = $1 USD.
           minimum: 1
         url:
-          type: string
-          description: The full domain URL of the program (subdomain.domain).
+          type:
+            - "string"
+            - "null"
+          description: >-
+            The full domain URL of the program (subdomain.domain). Null until
+            a domain has been assigned.
         active:
           type: integer
           description: 1 for active, 0 for inactive.
@@ -3562,36 +4091,42 @@ components:
             Indicates whether the program has any shareable adjustments.
             When true, point_sharing cannot be disabled.
         share_link_label:
-          type: string
-          nullable: true
+          type:
+            - "string"
+            - "null"
           description: Custom label for the participant-facing share link.
         share_total_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Lifetime maximum a participant may share in this program. Null
             means no limit.
         share_per_transaction_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share in a single transaction.
             Null means no limit.
         share_daily_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share per day. Null means no
             limit.
         share_weekly_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share per week. Null means no
             limit.
         share_monthly_max:
-          type: number
-          nullable: true
+          type:
+            - "number"
+            - "null"
           description: >-
             Maximum amount a participant may share per month. Null means no
             limit.
@@ -3615,27 +4150,26 @@ components:
             America/Adak, Pacific/Honolulu.
           default: America/Phoenix
         start_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program start date (YYYY-MM-DD).
         end_date:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Program end date (YYYY-MM-DD HH:MM:SS).
         created_at:
           type: string
           description: Creation timestamp (Y-m-d H:i:s).
         updated_at:
-          type: string
-          description: Last update timestamp (Y-m-d H:i:s).
+          type:
+            - "string"
+            - "null"
+          description: Last update timestamp (Y-m-d H:i:s), null if never updated.
         organization:
-          type: object
-          description: The parent organization.
-          properties:
-            unique_id:
-              type: string
-            name:
-              type: string
-            id:
-              type: integer
+          type: string
+          description: The parent organization's unique_id.
         meta:
           type:
             - "array"
@@ -3643,7 +4177,9 @@ components:
           items:
             $ref: '#/components/schemas/Meta'
         cost_center_id:
-          type: string
+          type:
+            - "string"
+            - "null"
           description: Cost center identifier.
           maxLength: 45
         accounting_id:
@@ -3679,7 +4215,10 @@ components:
           items:
             $ref: '#/components/schemas/ProductSku'
         auto_redemption:
-          $ref: '#/components/schemas/AutoRedemption'
+          oneOf:
+            - $ref: '#/components/schemas/AutoRedemption'
+            - type: 'null'
+          description: Null when auto-redemption is not configured for this program.
         one_time_auto_redemptions:
           type: array
           items:
@@ -3689,14 +4228,21 @@ components:
           items:
             $ref: '#/components/schemas/ProgramType'
         actions:
-          $ref: '#/components/schemas/Actions'
+          oneOf:
+            - $ref: '#/components/schemas/Actions'
+            - type: array
+              maxItems: 0
+          description: >-
+            Map of available action booleans, keyed by action name. Serializes
+            as an empty array ([]) rather than an object when the program has
+            no assigned program types.
     ProgramCreate:
       type: object
       required:
         - unique_id
         - name
         - point
-        - Organization
+        - organization
       properties:
         unique_id:
           type: string
@@ -3871,7 +4417,10 @@ components:
           maxLength: 125
         point:
           type: number
-          description: The point-to-USD ratio.
+          description: >-
+            The point-to-USD ratio. Immutable after the program is created:
+            sending a different value than the program already has fails with
+            400. Sending the same value is fine.
           minimum: 1
         url:
           type: string
@@ -4761,7 +5310,7 @@ components:
         - HOLD
         - INACTIVE
         - CANCELLED
-        - SUSPENDED
+        - DATADEL
     IndustryProgramEnum:
       type: integer
       description: >-
@@ -5003,9 +5552,11 @@ components:
       type: object
       properties:
         min:
-          type: integer
+          type: string
+          description: Minimum price filter. Empty string when no minimum is configured.
         max:
-          type: integer
+          type: string
+          description: Maximum price filter. Empty string when no maximum is configured.
     Brand:
       type: object
       properties:
