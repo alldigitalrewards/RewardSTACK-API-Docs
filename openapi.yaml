@@ -2964,7 +2964,9 @@ paths:
       operationId: getServiceAwardList
       security:
         - Bearer: [ ]
-      description: Returns a paginated collection of service awards configured for the specified program.
+      description: >-
+        Returns a paginated collection of service awards configured for the specified program.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3060,6 +3062,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAwardError'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
     post:
@@ -3072,6 +3076,7 @@ paths:
       description: >-
         Create a new service award for the specified program. The award defines
         the reward type, value, trigger schedule, and optional email notifications.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3107,6 +3112,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAwardError'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
   /api/program/{programId}/service-award/{serviceAwardId}:
@@ -3117,7 +3124,9 @@ paths:
       operationId: getServiceAward
       security:
         - Bearer: [ ]
-      description: Returns a single service award by its unique identifier.
+      description: >-
+        Returns a single service award by its unique identifier.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3140,6 +3149,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAwardDetail'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Service award not found
           content:
@@ -3170,6 +3181,7 @@ paths:
         is_trigger_yearly, interval, issuance_time, and timezone can no
         longer be changed; name, active, and the email fields can still be
         changed at any time.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3206,6 +3218,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAwardError'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Service award not found
           content:
@@ -3246,6 +3260,7 @@ paths:
         Delete a service award. The award is removed. Any of its
         fulfillments that have not yet been processed are marked failed.
         Participant enrollment records for the award are not removed.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3264,6 +3279,8 @@ paths:
       responses:
         '204':
           description: Service award deleted
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Service award not found
           content:
@@ -3291,6 +3308,7 @@ paths:
       description: >-
         Returns a paginated list of participants enrolled in the specified
         service award, including their milestone date and fulfillment history.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3365,6 +3383,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAwardError'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
     post:
@@ -3381,6 +3401,7 @@ paths:
         validated against the program before enrollment. If the award has
         issuance emails enabled, enrolled participants will receive a
         notification.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3467,6 +3488,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceAwardError'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
   /api/program/{programId}/milestone:
@@ -3477,7 +3500,9 @@ paths:
       operationId: getMilestoneList
       security:
         - Bearer: [ ]
-      description: Returns paginated collection of milestones for the specified program.
+      description: >-
+        Returns paginated collection of milestones for the specified program.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3544,6 +3569,8 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
               example:
                 message: Internal server error
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
     post:
@@ -3556,6 +3583,7 @@ paths:
       description: >-
         Exactly one of reward_sku or reward_adjustment is required. Sending
         neither, or both, is a 400.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3609,6 +3637,8 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
               example:
                 message: Internal server error
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
   /api/program/{programId}/milestone/{milestoneId}:
@@ -3619,7 +3649,9 @@ paths:
       operationId: getMilestone
       security:
         - Bearer: [ ]
-      description: Returns a single milestone with its activities.
+      description: >-
+        Returns a single milestone with its activities.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3642,6 +3674,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MilestoneRead'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Milestone not found, or does not belong to the program.
           content:
@@ -3674,6 +3708,7 @@ paths:
         replaces every existing activity on the milestone with one new
         activity per entry; this happens even if the milestone's activities
         are locked.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3715,6 +3750,8 @@ paths:
               example:
                 reward_sku: ["cannot have both reward_sku and reward_adjustment"]
                 reward_adjustment: ["cannot have both reward_sku and reward_adjustment"]
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Milestone not found, or does not belong to the program.
           content:
@@ -3756,6 +3793,7 @@ paths:
         When child_milestone is true, name is read as the UUID of an
         existing milestone in the program to attach as a child, instead of
         a free-text activity name.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3825,6 +3863,8 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
               example:
                 message: Internal server error
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
     get:
@@ -3834,7 +3874,9 @@ paths:
       operationId: getActivityList
       security:
         - Bearer: [ ]
-      description: Returns the paginated collection of activities for the specified milestone.
+      description: >-
+        Returns the paginated collection of activities for the specified milestone.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3910,6 +3952,8 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
               example:
                 message: Internal server error
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
 
@@ -3921,6 +3965,7 @@ paths:
       operationId: updateActivity
       security:
         - Bearer: [ ]
+      description: Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -3965,6 +4010,8 @@ paths:
                 $ref: '#/components/schemas/MilestoneFieldErrors'
               example:
                 name: ["must be a string", "maximum 255 characters"]
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Activity not found, or does not belong to the milestone or program.
           content:
@@ -4002,7 +4049,9 @@ paths:
       operationId: deleteActivity
       security:
         - Bearer: [ ]
-      description: Remove an activity from a milestone.
+      description: >-
+        Remove an activity from a milestone.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -4034,6 +4083,8 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
               example:
                 message: Activity deleted successfully
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Activity not found, or does not belong to the milestone or program.
           content:
@@ -4161,7 +4212,10 @@ paths:
       operationId: getParticipantProgressList
       security:
         - Bearer: [ ]
-      description: Returns the paginated collection of participant progress for the specified milestone.
+      description: >-
+        Returns the paginated collection of participant progress for the
+        specified milestone.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -4243,6 +4297,8 @@ paths:
                 $ref: '#/components/schemas/MessageResponse'
               example:
                 message: Internal server error
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
     post:
@@ -4252,7 +4308,9 @@ paths:
       operationId: bulkUpsertParticipantProgress
       security:
         - Bearer: [ ]
-      description: Create or update progress for multiple participants in bulk.
+      description: >-
+        Create or update progress for multiple participants in bulk.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -4312,6 +4370,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BulkUpsertAllFailedResponse'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         default:
           description: Unknown exception
   /api/program/{programId}/milestone/{milestoneId}/participant/{participantId}:
@@ -4322,7 +4382,9 @@ paths:
       operationId: getParticipantProgress
       security:
         - Bearer: [ ]
-      description: Returns detailed progress information for a specific participant in a milestone.
+      description: >-
+        Returns detailed progress information for a specific participant in a milestone.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -4351,6 +4413,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ParticipantProgressDetail'
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: >-
             Milestone not found (also returned when it does not belong to
@@ -4384,6 +4448,7 @@ paths:
       description: >-
         Update the completion status of a specific activity for a
         participant. An empty body marks the activity complete.
+        Requires a Super Admin token; an organization API user's token gets 403 Forbidden.
       parameters:
         - name: programId
           in: path
@@ -4434,6 +4499,8 @@ paths:
                 $ref: '#/components/schemas/MilestoneFieldErrors'
               example:
                 completed: ["must be a boolean"]
+        '403':
+          $ref: '#/components/responses/SuperAdminRequired'
         '404':
           description: Milestone, activity, or participant progress not found.
           content:
@@ -4769,6 +4836,14 @@ components:
     Forbidden:
       description: >-
         The token's user cannot access the organization or program in the URL.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MessageResponse'
+          example:
+            message: Forbidden
+    SuperAdminRequired:
+      description: The token is valid, but its user is not a Super Admin.
       content:
         application/json:
           schema:
